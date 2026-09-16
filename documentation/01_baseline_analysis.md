@@ -1,14 +1,14 @@
 # Initial Architecture
 TBC - architecture diagram
 
-## Device
+## Temperature Sensor Device Specifications
 * Device: Arduino Uno (ATmega328P)
 * Key Specs: 16 MHz CPU, 2 KB SRAM, 32 KB Flash.
 * It will give us plain sensor telemetry (e.g., Temperature, Device ID, Timestamp).
 * It is a lightweight Python script simulating the payload and packet size.
 * No hardware or complex emulators required.
-* It has a memory barrier (=???), as ML-KEM-512 requires keys and working memory totaling over 2–3 KB. => to clarify this sentence
-* It physically cannot run inside 2 KB of RAM without a stack overflow or crash.
+* The device has a memory limit. And ML-KEM-512 requires the use of keys (e.g. a 1,632 bytes secret key), while the device's working memory might need 1000 to 1500bytes. So this adds up to approximately 3 KB.
+* As a result, ML-KEM is unable to physically inside 2 KB of RAM without a stack overflow or crash.
 * We will use simple lightweight key based encryptions (AES-128 or ChaCha20). The sensor cannot handle anything more complex.
 * We will keep the payload output simple as well:
 ```json
