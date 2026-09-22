@@ -1,0 +1,16 @@
+[project]
+name = "oulu-sdmo-group23"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Danish Sharjeel", email = "Danish.Sharjeel@student.oulu.fi" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "cryptography>=50.0.1",
+    "mlkem>=0.0.3",
+]
+
+[tool.uv]
+package = false
