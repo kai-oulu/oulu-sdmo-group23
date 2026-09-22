@@ -1,7 +1,5 @@
 """Deterministic security and invalid-input tests for AES-GCM packet handling."""
 
-import json
-
 import pytest
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -51,16 +49,6 @@ def test_decrypt_payload_rejects_modified_nonce(
 
     with pytest.raises(InvalidTag):
         edge_gateway.decrypt_payload(bytes(packet), test_key)
-
-
-def test_decrypt_payload_accepts_replayed_valid_packet(
-    telemetry_payload, test_key, fixed_nonce
-) -> None:
-    """Security unit test: documents the current absence of replay detection in this function."""
-    packet = legacy_device.encrypt_payload(telemetry_payload, test_key)
-
-    assert edge_gateway.decrypt_payload(packet, test_key) == json.dumps(telemetry_payload)
-    assert edge_gateway.decrypt_payload(packet, test_key) == json.dumps(telemetry_payload)
 
 
 def test_encrypt_payload_rejects_invalid_key_length(telemetry_payload) -> None:
@@ -115,9 +103,3 @@ def test_decrypt_payload_raises_for_authenticated_non_utf8_plaintext(test_key, f
     with pytest.raises(UnicodeDecodeError):
         edge_gateway.decrypt_payload(fixed_nonce + ciphertext_and_tag, test_key)
 
-
-def test_decrypt_payload_returns_authenticated_non_json_utf8_text(test_key, fixed_nonce) -> None:
-    """Unit boundary test: documents that the gateway decodes but does not parse JSON text."""
-    ciphertext_and_tag = AESGCM(test_key).encrypt(fixed_nonce, b"not-json", None)
-
-    assert edge_gateway.decrypt_payload(fixed_nonce + ciphertext_and_tag, test_key) == "not-json"

@@ -4,6 +4,7 @@ import json
 import socket
 
 import pytest
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 import edge_gateway
 import legacy_device
@@ -14,6 +15,11 @@ def _send_and_close(port: int, data: bytes) -> None:
     with socket.create_connection(("127.0.0.1", port), timeout=3) as client:
         client.sendall(data)
         client.shutdown(socket.SHUT_WR)
+
+
+def _encrypt_plaintext(plaintext: bytes, key: bytes, nonce: bytes) -> bytes:
+    """Build a valid AES-GCM packet for gateway validation-boundary tests."""
+    return nonce + AESGCM(key).encrypt(nonce, plaintext, None)
 
 
 def test_gateway_remains_available_after_malformed_nonempty_packet(
@@ -65,6 +71,59 @@ def test_gateway_remains_available_after_two_packets_share_one_connection(
 
     received = running_gateway.wait_for_line("Received from device: ")
     assert received == "Received from device: " + json.dumps(telemetry_payload)
+    assert running_gateway.process.poll() is None
+
+
+def test_gateway_rejects_authenticated_non_json_payload_and_processes_valid_packet(
+    running_gateway, telemetry_payload, test_key, fixed_nonce
+) -> None:
+    """Validation acceptance test: non-JSON plaintext must not be accepted as telemetry."""
+    invalid_packet = _encrypt_plaintext(b'{"device_id":', test_key, fixed_nonce)
+    valid_packet = legacy_device.encrypt_payload(telemetry_payload, test_key)
+    _send_and_close(running_gateway.port, invalid_packet)
+    _send_and_close(running_gateway.port, valid_packet)
+
+    received = running_gateway.wait_for_line("Received from device: ")
+    assert received == "Received from device: " + json.dumps(telemetry_payload)
+    assert running_gateway.process.poll() is None
+
+
+def test_gateway_rejects_wrong_telemetry_schema_and_processes_valid_packet(
+    running_gateway, telemetry_payload, test_key, fixed_nonce
+) -> None:
+    """Validation acceptance test: JSON missing required telemetry fields must be rejected."""
+    wrong_schema = {"device_id": "sensor-node-01", "timestamp": 1_726_478_400}
+    invalid_packet = _encrypt_plaintext(
+        json.dumps(wrong_schema).encode("utf-8"), test_key, fixed_nonce
+    )
+    valid_packet = legacy_device.encrypt_payload(telemetry_payload, test_key)
+    _send_and_close(running_gateway.port, invalid_packet)
+    _send_and_close(running_gateway.port, valid_packet)
+
+    received = running_gateway.wait_for_line("Received from device: ")
+    assert received == "Received from device: " + json.dumps(telemetry_payload)
+    assert running_gateway.process.poll() is None
+
+
+def test_gateway_rejects_replayed_packet_and_processes_new_valid_packet(
+    running_gateway, telemetry_payload, test_key, fixed_nonce
+) -> None:
+    """Security acceptance test: replayed packets must not be processed a second time."""
+    first_packet = legacy_device.encrypt_payload(telemetry_payload, test_key)
+    next_payload = {**telemetry_payload, "timestamp": 1_726_478_401}
+    next_packet = _encrypt_plaintext(
+        json.dumps(next_payload).encode("utf-8"), test_key, bytes(range(1, 13))
+    )
+    _send_and_close(running_gateway.port, first_packet)
+
+    first_received = running_gateway.wait_for_line("Received from device: ")
+    assert first_received == "Received from device: " + json.dumps(telemetry_payload)
+
+    _send_and_close(running_gateway.port, first_packet)
+    _send_and_close(running_gateway.port, next_packet)
+
+    received = running_gateway.wait_for_line("Received from device: ")
+    assert received == "Received from device: " + json.dumps(next_payload)
     assert running_gateway.process.poll() is None
 
 
