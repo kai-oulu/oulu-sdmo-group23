@@ -109,6 +109,85 @@ In accordance with course guidelines, this section logs the human-AI interaction
   * **Conclusion & Decision:** The test code was verified to be correct and complete. Rather than prompting the LLM further to implement fixes in the gateway code, the developer preserved the failing tests to show that this was a limitation in the baseline code.
 
 
+
+
+### 1.6. Interaction 6 (Gateway Hardening): Fixing 6 Failing Tests
+
+* **Context / Objective:** Fix gateway to not crash on malformed packets, add schema validation and replay protection, make 33/33 tests pass.
+* **Prompt Given to LLM:**
+  > *"My edge_gateway.py crashes when it receives malformed AES-GCM packets (InvalidTag) and it accepts any JSON without validating required fields device_id, timestamp, temperature, humidity, status, and it doesn't check for replayed nonces. How should I improve my edge gateway to pass these tests: test_gateway_remains_available_after_malformed_nonempty_packet, test_gateway_remains_available_after_connection_closes_mid_packet, test_gateway_remains_available_after_two_packets_share_one_connection, test_gateway_rejects_authenticated_non_json_payload_and_processes_valid_packet, test_gateway_rejects_wrong_telemetry_schema_and_processes_valid_packet, test_gateway_rejects_replayed_packet_and_processes_new_valid_packet? Keep it simple, with logging."*
+* **LLM Output Summary:**
+  * Suggested wrapping decrypt in try/except InvalidTag, ValueError, UnicodeDecodeError, JSONDecodeError, logging warning and continuing loop
+  * Suggested REQUIRED_FIELDS set and `REQUIRED_FIELDS.issubset(payload.keys())` for schema validation
+  * Suggested `seen_nonces=set()` for replay protection, check `if nonce in seen_nonces: reject`, add after successful validation
+  * Suggested metrics dict and logging to file
+* **Human Review & Decision:**
+  * **Accepted:** try/except code segments for error handling, REQUIRED_FIELDS validation, seen_nonces set, metrics, logging to file
+  * **Modified:** LLM suggested logging to stderr - changed to file handler `gateway.log` because tests use `stderr=STDOUT` merged pipe. Logging to stderr polluted `wait_for_line` (caused "Received ...Gateway health listening" concatenated line). Fixed by logging to file only.
+  * **Modified:** Large packet test `test_gateway_decrypts_large_packet_received_across_multiple_chunks` originally used payload `{"device_id":..., "samples": "x"*5000}` missing required fields, so after adding schema validation it failed. Updated test payload to include the new set of required fields + examples to test buffer accumulation.
+  * **Verification:** Ran `pytest -v` → 33 passed, 0 failed. Manual E2E legacy→gateway with 2 sends worked, logs show valid telemetry.
+
+
+### 1.7. Interaction 7 (ML-KEM Integration): Post-Quantum Cryptography Library and Hybrid Design
+
+* **Context / Objective:** Integrate ML-KEM into Link 2 (gateway→cloud) using existing library, keep legacy Link 1 unchanged.
+* **Prompt Given to LLM:**
+  > *"I need to integrate ML-KEM-512 into my edge-cloud system. I have mlkem==0.0.3 library. Show how to generate keypair, encapsulate/decapsulate, and build hybrid encryption where ML-KEM shared secret (32B) is used as AES-256-GCM key to encrypt telemetry JSON. Keep the design simple, with file-based public key distribution."*
+* **LLM Output Summary:**
+  * Initially suggested `MLKEM512.keygen()` and `ek.encaps()` which do not exist in `mlkem==0.0.3`
+  * Suggested hybrid pattern: KEM + AES-GCM, which is correct
+  * Suggested file-based public key distribution for simplicity
+* **Human Review & Decision:**
+  * **Rejected:** `MLKEM512.keygen()` - tested via `python -c "import mlkem; help(mlkem)"` and REPL, found correct API is `ML_KEM(ParameterSet.ML_KEM_512).key_gen() -> ek, dk` and `mlkem_obj.encaps(ek) -> ss, ct` and `mlkem_obj.decaps(dk, ct) -> ss`
+  * **Accepted:** Hybrid pattern, file-based distribution (cloud writes `cloud_public_key.bin` 800B, gateway reads), wire format ct+nonce+aes_ct, constants PK_LEN=800, CT_LEN=768, SS_LEN=32
+  * **Modified:** Added timing metrics `encaps_ms`, `decaps_ms` for Post-Quantum Cryptography observability, added logging
+  * **Verification:** Tested round-trip via `python src/pqc_utils.py` → packet 845B, encaps 0.03ms, decaps 0.04ms, decrypt matches original. Also tested via REPL `encrypt_for_cloud` then `decrypt_from_gateway`.
+
+### 1.8. Interaction 8 (Cloud Service + SQLite DB + Analytics)
+
+* **Context / Objective:** Build cloud service that is compatile with our post-quantum cryptography setup, stores telemetry in a simple DB, and provides simple usage analytics such as observability.
+* **Prompt Given to LLM:**
+  > *"Create a cloud_service.py that listens on TCP 6000 for post-quantum cryptography packets (ct 768 + nonce 12 + aes_ct), decapsulates using ML-KEM-512 private key, AES-GCM decrypts, stores in SQLite telemetry.db with table telemetry(id, device_id, timestamp, temperature, humidity, status, received_at, source_ip, pqc_decaps_ms, raw_json), and has healthcheck/analytics endpoint on 6001 returning JSON with db_rows, avg temp/humidity, last 10, decaps_ok/fail, success_rate, avg_decaps_ms. Keep it simple."*
+* **LLM Output Summary:**
+  * Suggested using `sqlite3` stdlib, `http.server` for health endpoint (no Flask), threading for health server, metrics dict with lock for thread safety, `check_same_thread=False` for sqlite
+  * Suggested `CREATE TABLE IF NOT EXISTS` and `INSERT` with `?` placeholders
+  * Suggested analytics queries `SELECT COUNT(*), AVG(temperature)` and `last 10 ORDER BY received_at DESC`
+* **Human Review & Decision:**
+  * **Accepted:** SQLite with stdlib, http.server for health (rejected Flask to keep simple), threading, metrics, analytics queries
+  * **Modified:** LLM suggested logging to stderr - changed to file handler `cloud.log` to keep stdout clean for tests and Docker logs
+  * **Verification:** Ran cloud alone → `telemetry.db` 12K created, public key 800B file, `curl http://127.0.0.1:6001/health` returns JSON with db_rows 0, analytics empty, Post-Quantum Cryptography metrics. Then E2E with gateway: 2 sends → DB has 2 rows, health shows db_rows 2, avg_temp 21.8, decaps_ok 2, success_rate 1.0.
+
+### 1.9. Interaction 9 (Gateway Forwarding + Fallback + Health)
+
+* **Context / Objective:** Extend gateway to forward telemetry data to cloud service via Post-Quantum Cryptography, with fallback to local logs if cloud is down or public key missing, and add health endpoint 5001.
+* **Prompt Given to LLM:**
+  > *"Extend edge_gateway.py to forward telemetry to the cloud service via Post-Quantum Cryptography. If missing or cloud service is unreachable, append JSON to gateway_fallback.log with timestamp and increment fallback_local metric. Use pqc_utils.encrypt_for_cloud and TCP send to 127.0.0.1:6000. Add health endpoint on 5001 returning JSON with received, rejected, replayed, forwarded_to_cloud, fallback_local, cloud_fail, replay_cache_size, uptime. Keep it simple, stdlib http.server, thread-safe metrics."*
+* **LLM Output Summary:**
+  * Suggested `forward_to_cloud()` function with try load public key, try socket create_connection with timeout, fallback to file append, metrics with lock
+  * Suggested health handler similar to cloud, threading
+* **Human Review & Decision:**
+  * **Accepted:** forward_to_cloud logic, fallback log format `<timestamp> <json>`, metrics `forwarded_to_cloud`, `fallback_local`, `cloud_fail`, health thread on 5001
+  * **Modified:** Removed `print` for health listening to keep stdout clean for tests (only log to file), added `metrics_lock` for thread safety
+  * **Verification:** Tested fallback: stop cloud, send legacy → `gateway_fallback.log` has entry, health 5001 shows fallback_local=1. Tested E2E with cloud up: 2 sends → DB 2 rows, gateway health forwarded=2, cloud health decaps_ok=2.
+
+### 1.10. Interaction 10 (Docker + CI/CD + pyproject.toml/uv.lock/.python-version)
+
+* **Context / Objective:** Create CI/CD and Docker that syncs with our pyproject.toml, uv.lock, .python-version.
+* **Prompt Given to LLM:**
+  > *"Generate GitHub Actions CI and Dockerfile and docker-compose for Python project using uv package manager, with pyproject.toml, uv.lock, .python-version 3.13. CI should run pytest -v, test Post-Quantum Cryptography utils, check imports. Dockerfile should be python:3.13-slim, and please follow the locked versions found in uv, and add health check. docker-compose should have cloud and gateway services with healthchecks and volume sharing for public key. Keep it simple."*
+* **LLM Output Summary:**
+  * Initially suggested `pip install -r requirements.txt` - rejected. Our project uses pyproject.toml + uv, not requirements.txt
+  * Suggested Flask for health - rejected, we use stdlib http.server
+  * Suggested `astral-sh/setup-uv` action, `uv sync --frozen`, Dockerfile with `pip install uv && uv sync --frozen --no-install-project`, `ENV PATH .venv/bin`
+* **Human Review & Decision:**
+  * **Rejected:** requirements.txt approach, Flask
+  * **Accepted:** `astral-sh/setup-uv@v4` with cache, `uv python install`, `uv sync --frozen`, `uv pip install pytest`, `uv run pytest -v`, Dockerfile with `COPY pyproject.toml uv.lock .python-version README.md`, `uv sync --frozen --no-install-project`, `ENV PATH .venv/bin`, HEALTHCHECK via socket connect, docker-compose with `depends_on healthy` and bind mounts for public key file
+  * **Modified:** Added `[dependency-groups] dev = ["pytest>=8.0"]` to pyproject.toml to track pytest as dev dep, while main deps remain locked in uv.lock
+  * **Verification:** Ran `pytest -v` 33 passed after pyproject.toml edit, checked Dockerfile copies correct files, CI yml contains checks for .python-version, pyproject.toml, uv.lock existence
+
+
+
+
 ---
 
 ## 2. Design Decisions: Accepted, Modified, and Rejected
@@ -117,7 +196,7 @@ The following matrix documents the architectural trade-offs evaluated during the
 
 | Decision Area | Option Selected (Accepted) | Alternatives Evaluated | Status | Rationale |
 | :--- | :--- | :--- | :--- | :--- |
-| **PQC Placement** | Offload ML-KEM to Edge Gateway | Run ML-KEM-512 directly on the sensor | **Rejected** | ML-KEM-512 requires ~1,632 bytes for secret keys and 1,000–1,500 bytes working memory (~3 KB total). The sensor has only 2 KB SRAM, causing an unavoidable stack overflow. |
+| **Post-Quantum Cryptography Placement** | Offload ML-KEM to Edge Gateway | Run ML-KEM-512 directly on the sensor | **Rejected** | ML-KEM-512 requires ~1,632 bytes for secret keys and 1,000–1,500 bytes working memory (~3 KB total). The sensor has only 2 KB SRAM, causing an unavoidable stack overflow. |
 | **Local Link Security** | AES-128-GCM with 16-byte PSK | ChaCha20-Poly1305, Plain AES-CBC | **Accepted** | AES-GCM provides Authenticated Encryption with Associated Data (AEAD), ensuring both confidentiality and tamper detection (GMAC tag). |
 | **Transport Layer** | Bare TCP Socket (`port 5000`) | WebSockets, HTTP/REST, MQTT | **Rejected** | WebSockets and HTTP introduce 200–500 bytes of header overhead per message, exhausting sensor RAM and wasting battery power. |
 | **Packet Framing** | Single-shot Connection Closure (`EOF`) | 4-byte Length-Prefix Header, Delimiter framing | **Accepted / Modified** | EOF framing simplifies microcontroller memory management. (Noted as a temporary trade-off: persistent connections with length headers may be considered in future sprints). |
@@ -159,6 +238,6 @@ Empirical testing (including 27 passing tests and 6 failing integration tests in
 | **R1** | **Gateway Denial of Service (Crash via Malformed Input)** | **High** | A single bad transmission terminates the gateway process. | Wrap socket parsing and decryption in `try...except (InvalidTag, ValueError, UnicodeDecodeError)` blocks to log anomalies and keep the listening loop alive. |
 | **R2** | **Replay Attacks on Legacy Link** | **Medium** | Stale or malicious telemetry can be reinjected into the cloud pipeline. | Add a sliding-window timestamp validator or track seen nonces in an in-memory gateway cache with a short time-to-live (TTL). |
 | **R3** | **Pre-Shared Key (PSK) Extraction** | **Medium** | Physical tampering with a sensor could expose the symmetric key. | Use protected internal Flash memory on embedded targets, plan for gateway-side per-device subkeys rather than a global shared key. |
-| **R4** | **PQC Performance & Memory Overhead on Gateway** | **Medium** | Integrating `mlkem` for Cloud forwarding may increase CPU latency. | Benchmark ML-KEM-512 encapsulation time and memory footprint on the edge gateway host to ensure real-time ingestion. |
+| **R4** | **Post-Quantum Cryptography Performance & Memory Overhead on Gateway** | **Medium** | Integrating `mlkem` for Cloud forwarding may increase CPU latency. | Benchmark ML-KEM-512 encapsulation time and memory footprint on the edge gateway host to ensure real-time ingestion. |
 | **R5** | **Scalability & Concurrent Node Starvation** | **Low** | Multiple sensor nodes transmitting simultaneously could cause connection timeouts. | Refactor `edge_gateway.py` to use asynchronous I/O (`asyncio`) or a multi-threaded connection worker pool. |
 

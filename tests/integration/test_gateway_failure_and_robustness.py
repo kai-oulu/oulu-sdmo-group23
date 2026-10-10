@@ -131,7 +131,17 @@ def test_gateway_decrypts_large_packet_received_across_multiple_chunks(
     running_gateway, test_key, fixed_nonce
 ) -> None:
     """Robustness integration test: detects failure to accumulate data beyond one recv(1024) chunk."""
-    payload = {"device_id": "sensor-node-01", "samples": "x" * 5_000}
+    # Before 2026.10.10
+    # payload = {"device_id": "sensor-node-01", "samples": "x" * 5_000}
+    # From 2026.10.10: Updated to include required telemetry fields so it passes schema validation after hardening
+    payload = {
+        "device_id": "sensor-node-01",
+        "timestamp": 1_726_478_400,
+        "temperature": 21.8,
+        "humidity": 55.4,
+        "status": "OK",
+        "samples": "x" * 5_000,
+    }
     packet = legacy_device.encrypt_payload(payload, test_key)
     _send_and_close(running_gateway.port, packet)
 
