@@ -16,20 +16,54 @@ NIST published a quantum standard FIPS 203 ML-KEM (Module-Lattice-based Key Enca
 
 For organizations with thousands of low-cost sensors, they cannot replace all their sensor devices overnight. EU and CISA both recommend a hybrid deployment: keep legacy sensor devices running while adding PQC (Post-Quantum Cryptography) on internet-facing links, with fallbacks to ensure compatibility with legacy sensor devices [3][5]. Migration will take **10-20 years** for organizations that use alot of sensor devices [3].
 
-If your data needs **5+ years of confidentiality** (medical records, IP, financial, government secrets), migration is already overdue. EU notes with CRQC (cryptographically relevant quantum computer) predicted by 2030, if cover time is 5 years or more, it is already too late for many to move in time [3]. For such data, "harvest now, decrypt later" means traffic captured today can be decrypted retroactively once quantum arrives [2].
+**Critical point for executives:** If your data needs **5+ years of confidentiality** (medical records, IP, financial, government secrets), migration is already overdue. EU notes that with CRQC (cryptographically relevant quantum computer) predicted by 2030, if cover time is 5 years or more, it is already too late for many to move in time [3]. For such data, traffic captured today can be decrypted retroactively once quantum arrives [2]. This is due to **cover time** — explained below in simple terms.
 
-**What is cover time? (simple explanation for non-CS):**
-- **Cover time = how long you need your data to stay secret.** Think of it as expiry date for confidentiality.
-  - Medical record: needs 20+ years secret (patient privacy law)
-  - Bank transaction / trade secret / IP: 7-10 years
-  - Sensor telemetry for factory: maybe 1-2 years (short-lived)
-  - Government secret: 25+ years
-- **Why it matters with quantum:** Attacker can do "harvest now, decrypt later" — they don't need quantum computer today. They just **record your encrypted traffic now** (like copying a locked safe) and **store it**. When quantum computer arrives in 2030 that can pick old RSA/ECC locks, they **open the safe and read the old data** [2][5].
-- **Example timeline:** Today is 2026. You send medical data encrypted with RSA. Attacker records it. Quantum computer arrives 2030 (4 years later). If that medical data needs 20 years cover time (until 2046), attacker in 2030 can decrypt data that should have stayed secret until 2046 — **16 years too early**. So even though quantum is 4 years away, your 20-year data is already at risk today [3].
-- **Rule of thumb for executives:** `If (cover time + migration time) > (time until CRQC)`, you are already late. Migration itself takes 10-20 years [3], so if CRQC by 2030 (4 years away) and migration takes 10 years, any data needing >0 years confidentiality is at risk. That's why CISA says start inventory now [5].
-- **Our system example:** Our temperature telemetry maybe needs 1-2 years cover time (short-lived) — so 512-bit (~AES-128) is enough [1]. But if same system collected health data, we should use ML-KEM-768 or 1024 for longer cover time [1][2].
+### What is Cover Time? (Plain English, for non-CS executives)
 
-Our group's system (in the [GitHub repo](https://github.com/kai-oulu/oulu-sdmo-group23/tree/main)) is a minimal but working example of this hybrid deployment approach: legacy sensors retain the lightweight AES encryption method when communicating with the edge gateway, and the edge gateway communicates with the cloud service protected by Post-Quantum Cryptography, with a SQLite database for analytics and fallback logging via files for business continuity. It shows how an organization can start now and migrate to using Post-Quantum Cryptography without disrupting operations.
+**Cover time = how long you need your data to stay secret. Think of it as an expiry date for confidentiality.**
+
+| Data Type | Typical Cover Time Needed | Why |
+|-----------|---------------------------|-----|
+| Medical record | 20+ years | Patient privacy law, HIPAA |
+| Bank transaction / trade secret / IP | 7-10 years | Financial regulations, competitive advantage |
+| Factory sensor telemetry (temperature) | 1-2 years | Short-lived operational data |
+| Government classified secret | 25+ years | National security |
+
+**Why cover time matters with quantum + harvest-now-decrypt-later:**
+
+1. **Today (2026):** You send data encrypted with old RSA/ECC lock. Attacker does NOT need quantum computer yet. They just **record and store your encrypted traffic** — like photocopying a locked safe and keeping the copy [2][5].
+2. **2030 (predicted CRQC):** Cryptographically relevant quantum computer arrives that can pick old RSA/ECC locks [3]. Attacker now **opens the stored copy** and reads your old data [2].
+3. **Result:** Data that should have stayed secret until 2046 is exposed in 2030.
+
+**Concrete timeline example:**
+
+```
+2026: You send medical record (needs secrecy until 2046 = 20y cover time)
+      |
+      +--> Attacker records encrypted packet in 2026 (harvest)
+      |
+2030: Quantum computer arrives (CRQC) [3]
+      |
+      +--> Attacker decrypts 2026 packet in 2030
+      |
+      = Data exposed 16 YEARS too early (should be secret until 2046, but exposed in 2030)
+```
+
+Even though quantum is 4 years away (2026→2030), your 20-year data is **already at risk today** because attacker can harvest now [3].
+
+**Executive rule of thumb:**
+`If (cover time + migration time) > (time until quantum computer), you are already late.`
+
+- Migration itself takes **10-20 years** for large sensor fleets [3]
+- CRQC predicted by **2030** = 4 years away [3]
+- Example: Medical data cover time 20y + migration 10y = 30y needed. Time until quantum 4y. 30y > 4y → **already late** → must start inventory now [5]
+- Short-lived telemetry cover time 1-2y + migration 10y = 11-12y > 4y → still at risk, but lower priority than medical
+
+**How we used cover time in our system:**
+- Our temperature telemetry maybe needs **1-2 years cover time** (short-lived) — so **ML-KEM-512 (~AES-128)** is enough [1]
+- If same system collected **health data** needing 20y, we should use **ML-KEM-768 (recommended default) or 1024 (NSA CNSA 2.0 for national security)** for longer cover time [1][2]
+
+Our group's system (in the [GitHub repo](https://github.com/kai-oulu/oulu-sdmo-group23/tree/main)) is a minimal but working example of this hybrid deployment approach: legacy sensors retain lightweight AES when communicating with edge gateway, and edge gateway communicates with cloud protected by PQC, with SQLite analytics and fallback logging for business continuity. It shows how an organization can start now without disrupting operations.
 
 ---
 
@@ -39,9 +73,9 @@ Our baseline sensor device simulates **ATmega328P** (Arduino Uno): 16 MHz, 32KB 
 
 ML-KEM-512 needs **secret key 1632B** plus **1000-1500B workspace** for polynomial operations = ~3KB total, exceeding 2KB SRAM → stack overflow and crash [4]. This is not unique to our simulation - many real-world low-cost IoT devices (LoRaWAN, Zigbee, BLE) have similar constraints and cannot be upgraded to Post-Quantum Cryptography without hardware replacement [4]. PQC also introduces larger key sizes and increased processing power compared to classical crypto, and existing protocols assume specific key sizes that PQC exceeds, requiring protocol modifications [4].
 
-**Implication for organization:** You cannot push a firmware update to make old sensors quantum-safe. EU roadmap shares that hybrid-PQC ciphers/certificates are needed for legacy compatibility and hardware replacement may be required [3]. Forcing Post-Quantum Cryptography onto 2KB devices would exhaust RAM and battery. Many legacy low-cost IoT devices may not support PQC at all, necessitating hardware replacements in some cases [3].
+**Implication for organization:** You cannot push a firmware update to make old sensors quantum-safe. EU roadmap shares that hybrid-PQC ciphers/certificates are needed for legacy compatibility and hardware replacement may be required [3]. Forcing PQC onto 2KB devices would exhaust RAM and battery. Many legacy low-cost IoT devices may not support PQC at all, necessitating hardware replacements in some cases [3].
 
-**Our solution (offload pattern):** Keep Link1 unchanged between legacy sensor device and the edge gateway (no firmware update). Let **edge gateway (Linux/Raspberry Pi)** act as the secure intermediary - it has enough RAM, decrypts AES-GCM, validates schema of the data received from the sensor, checks that the sensor data was not part of a replay attack, then re-encrypts for sending to the cloud service via Post-Quantum Cryptography [4]. This pattern is recommended for resource-constrained sensor devices [4]. Gateway measures encaps ~0.03ms Rust / 0.82ms pure Python, decaps ~0.04ms / 1.46ms — negligible for gateway, but would be heavy for battery-powered sensor.
+**Our solution (offload pattern):** Keep Link1 unchanged between legacy sensor device and the edge gateway (no firmware update). Let **edge gateway (Linux/Raspberry Pi)** act as secure intermediary - it has enough RAM, decrypts AES-GCM, validates schema, checks replay attack, then re-encrypts for cloud via PQC [4]. This pattern is recommended for resource-constrained devices [4]. Gateway measures encaps ~0.03ms Rust / 0.82ms pure Python, decaps ~0.04ms / 1.46ms — negligible for gateway, but heavy for battery sensor.
 
 ---
 
@@ -51,13 +85,16 @@ CISA's Post-Quantum Cryptography initiative shares a phased, risk-based migratio
 
 1. **Inventory:** List all systems performing cryptography - including hidden IoT sensors, gateways, cloud APIs. Most organizations discover 60-80% more cryptography use than expected (inventory challenge). **Include non-production:** internal APIs, test/dev platforms are often overlooked and frequently targeted precisely because they lag behind in security [3]. EU emphasizes first mapping and creating an inventory of cryptographic systems [3]. CISA recommends **Automated Cryptographic Discovery and Inventory (ACDI) Tools** to automate this [5]. Maintaining a detailed cryptographic asset register is essential to assess risk at each endpoint [3].
 
-2. **Risk assessment:** Identify data with long secrecy lifetime (medical, financial, critical infrastructure telemetry) at risk from the "harvest now, decrypt later" concept [5]. **Use cover time to prioritize:** List each data type, ask "how many years must this stay secret?" — medical 20y, financial 7-10y, IP 10y, telemetry 1-2y. If cover time extends beyond 2030 (predicted CRQC), that data is already at risk from traffic captured today [2][3]. Example: medical record sent in 2026 needs secrecy until 2046 (20y cover time). Attacker records encrypted traffic in 2026, decrypts in 2030 with quantum, reads data 16 years before it should be public. So prioritize long cover time data first [3].
+2. **Risk assessment using cover time:** Identify data with long secrecy lifetime at risk from harvest-now-decrypt-later [5]. **Use cover time to prioritize:**
+   - List each data type + its cover time (medical 20y, financial 7-10y, IP 10y, telemetry 1-2y)
+   - If cover time extends beyond 2030 (predicted CRQC), that data is already at risk from traffic captured today [2][3]
+   - **Example:** Medical record sent in 2026 needs secrecy until 2046 (20y cover time). Attacker records encrypted traffic in 2026, decrypts in 2030 with quantum, reads data 16 years before it should be public. So prioritize long cover time data first [3]. This is why EU says if cover time ≥5y, it may already be too late [3].
 
-3. **Approach:** Prioritize internet-facing communication links first (e.g. gateway to cloud communication links), then internal communication links. EU recommends a hybrid approach to keep legacy sensor devices working during the transition [3]. **TLS 1.3 should be first step** as it provides necessary foundation for future PQC support [3].
+3. **Approach:** Prioritize internet-facing communication links first (e.g. gateway to cloud), then internal links. EU recommends hybrid approach to keep legacy sensor devices working during transition [3]. **TLS 1.3 should be first step** as it provides necessary foundation for future PQC support [3].
 
-4. **Hybrid migration:** Deploy Post-Quantum Cryptography alongside traditional cryptography, with a fallback for backward compatibility. If Post-Quantum Cryptography fails, fallback avoids bringing the whole system down, which is very important for business continuity [5]. Both EU and NIST advise **hybrid-PQC ciphers and hybrid digital certificates** — hybrid provides security of new PQC while allowing legacy devices that do not support PQC to continue using classical crypto [3]. This requires both ends (browser/server, IoT device/cloud) to support same algorithms [3].
+4. **Hybrid migration:** Deploy PQC alongside traditional crypto, with fallback for backward compatibility. If PQC fails, fallback avoids bringing whole system down — very important for business continuity [5]. Both EU and NIST advise **hybrid-PQC ciphers and hybrid digital certificates** — hybrid provides security of new PQC while allowing legacy devices that do not support PQC to continue using classical crypto [3]. This requires both ends (browser/server, IoT device/cloud) to support same algorithms [3].
 
-5. **Supply chain:** Work with vendors to ensure new sensor devices are PQC-capable. CISA's product categories list (Jan 2026) now prioritizes PQC-capable products in procurement [5]. CISA develops and regularly updates this list via EO 14306 [5].
+5. **Supply chain:** Work with vendors to ensure new sensor devices are PQC-capable. CISA product categories list (Jan 2026) now prioritizes PQC-capable products in procurement [5]. CISA develops and regularly updates this list via EO 14306 [5].
 
 EU roadmap adds: expect **10-20 years** for full migration in large organizations, need vendor cooperation, and need to plan for constrained radio overhead [3]. The web has seen most rapid progress: **hybrid-PQC ciphers already adopted in 8.6% of world's top 1M websites**, but hybrid-PQC certificates still early stages [3] — shows migration is feasible and already started.
 
@@ -76,8 +113,8 @@ We implemented a hybrid strategy which CISA/EU recommend, to show that the hybri
 
 **Phase 2 - Hybrid Approach (Current Build, 33/33 tests passed):**
 - **Link1 Between Legacy Sensor Device to Edge Gateway unchanged:** Legacy devices keep same PSK/Pre-Shared Key. This preserves our legacy sensor devices and keeps them working until they are ready to migrate to Post-Quantum Cryptography.
-- **Edge Gateway:** After validating telemetry data received from sensor device, gateway loads the public key `cloud_public_key.bin` 800B [2] and encapsulates. Wire format `ct(768)||nonce(12)||aes_ct` ~845B total [2]. This is exactly the hybrid pattern: KEM establishes 32B shared secret `ss` without transmitting it directly (Module-LWE hardness), then AES-256-GCM encrypts actual data [2].
-- **Why ML-KEM-512:** Lowest overhead 800B pk + 768B ct = 1568B vs 2272B for 768 (1184+1088) vs 3136B for 1024 (1568+1568) [2]. Offers around 128-bit security, sufficient for short-lived telemetry (minutes/hours). **2026 recommendation is ML-KEM-768 as default** — balances strong security and reasonable sizes, TLS hybrid group **X25519MLKEM768** uses it [2]. Choose **ML-KEM-1024 if you need longer-term margin or must follow NSA CNSA 2.0**, which requires 1024 for national security systems [2]. If long-term confidentiality is needed (medical), we should use 768 [1]. We chose 512 for minimal viable gateway (Linux/Pi) — encaps 0.03ms Rust / 0.82ms pure Python, decaps 0.04ms / 1.46ms [2].
+- **Edge Gateway:** After validating telemetry data received from sensor device, gateway loads public key `cloud_public_key.bin` 800B [2] and encapsulates. Wire format `ct(768)||nonce(12)||aes_ct` ~845B total [2]. This is exactly the hybrid pattern: KEM establishes 32B shared secret `ss` without transmitting it directly (Module-LWE hardness), then AES-256-GCM encrypts actual data [2].
+- **Why ML-KEM-512:** Lowest overhead 800B pk + 768B ct = 1568B vs 2272B for 768 (1184+1088) vs 3136B for 1024 (1568+1568) [2]. Offers around 128-bit security, sufficient for short-lived telemetry (minutes/hours). **2026 recommendation is ML-KEM-768 as default** — balances strong security and reasonable sizes, TLS hybrid group **X25519MLKEM768** uses it [2]. Choose **ML-KEM-1024 if you need longer-term margin or must follow NSA CNSA 2.0**, which requires 1024 for national security systems [2]. If long-term confidentiality is needed (medical), we should use 768 [1]. We chose 512 for minimal viable gateway (Linux/Pi) — encaps 0.03ms Rust / 0.82ms pure Python, decaps 0.04ms / 1.46ms [2]. **Choice depends on cover time:** short cover time (telemetry 1-2y) → 512 enough, long cover time (medical 20y) → 768 or 1024 [1][2].
 - **Cloud Service:** Decapsulates `ss = ML-KEM.decaps(dk, ct)`, AES-GCM decrypts, inserts into SQLite `telemetry.db`. Analytics via health 6001: `db_rows`, `COUNT`, `AVG(temperature/humidity)`, `last 10`, `decaps_ok/fail`, `success_rate`, `avg_decaps_ms` [2].
 - **Fallback ensures availability:** If public key missing or cloud unreachable (TCP 6000 refused/timeout), gateway logs to `gateway_fallback.log` `<timestamp> <json>` + `fallback_local++`, `cloud_fail++`. This offers business continuity per CISA hybrid guidance [5]. IT team can replay log later — no data loss. Cloud decaps fail → `decaps_fail++` but stays alive.
 - **Operational suitability:** CI via `astral-sh/setup-uv` reading `.python-version` 3.13 + `uv.lock`, `uv sync --frozen --all-groups`, pytest 33/33, `pqc_utils.py` round-trip, Dockerfile `python:3.13-slim` + `uv sync --frozen --no-install-project` respects lock, compose with `depends_on healthy`, volume `pqc-shared`, logging file-only to keep tests clean.
@@ -94,19 +131,18 @@ We implemented a hybrid strategy which CISA/EU recommend, to show that the hybri
 
 **Compliance Requirements:** CISA product categories list (Jan 2026) prioritizes PQC-capable products — procurement should require ML-KEM support [5]. EU roadmap requires inventory of all crypto systems [3]. **EU roadmap is more than advice — it will be enforced** through directives/regulations. PQC not explicitly in GDPR, but GDPR, NIS2 (2022), Cyber Resilience Act (2024) take risk-based approach requiring up-to-date policies and industry best practices [3]. NIST guidance more explicit about protocols but doesn't enforce — up to regulators to adopt [3].
 
-**Enforcement timeline:** Both EU and NIST recommend **non-PQC encryption removed by 2030 for critical systems, all others by 2035** [3]. With CRQC predicted by 2030 by many, organizations with 5+ year cover time are already late [3].
-
-**Market maturity:** Hybrid-PQC ciphers already in **8.6% of top 1M websites** [3], native ML-KEM in **OpenSSL 3.5+ (April 2025)**, deployed in Chrome/Firefox hybrid TLS [2] — migration has started, feasible now.
+**Enforcement timeline:** Both EU and NIST recommend **non-PQC encryption removed by 2030 for critical systems, all others by 2035** [3]. With CRQC predicted by 2030 by many, organizations with 5+ year cover time are already late [3]. Market maturity: hybrid-PQC ciphers already in **8.6% of top 1M websites** [3], native ML-KEM in **OpenSSL 3.5+ (April 2025)**, deployed in Chrome/Firefox hybrid TLS [2] — migration has started, feasible now.
 
 **Cost & Timeline:** Full migration 10-20 years for orgs with many sensors, especially when sensors are in faraway locations [3][5]. Start inventory now, adopt hybrid (Phase 2) to protect internet-facing links without disrupting legacy, plan hardware refresh to PQC-capable devices.
 
-**Key Actions:**
-1. **Inventory** all crypto now (including hidden IoT, non-prod internal APIs, test/dev) — likely 60-80% more than you think [3]. Use automated discovery tools like CISA ACDI [5].
-2. **Adopt hybrid with fallback** — keep legacy running, add PQC on internet-facing links, ensure business continuity [5]. Both ends must support same algorithms [3]. TLS 1.3 first step [3].
-3. **Measure PQC observability**: Track encaps/decaps ms, `success_rate = decaps_ok/(ok+fail)`, `fallback_local`, via health 6001/5001 and DB analytics — KPIs for migration progress.
-4. **Plan key management upgrades** (per-device subkeys, sign pk file, KMS, rotation) and hardware replacement budget. Choose param set based on data lifetime: 512 for short-lived telemetry, 768 default [2], 1024 for NSA CNSA 2.0 national security [2].
+**Key Actions (use cover time to prioritize):**
+1. **Inventory** all crypto now (including hidden IoT, non-prod internal APIs, test/dev) — likely 60-80% more than you think [3]. Use automated discovery tools like CISA ACDI [5]. For each system, record cover time (how many years must data stay secret).
+2. **Prioritize by cover time:** Data with 20y cover time (medical) first, then 7-10y (financial/IP), then 1-2y (telemetry). If cover time + migration time (10-20y) > time until quantum (2030 = 4y away), you are already late [3][5].
+3. **Adopt hybrid with fallback** — keep legacy running, add PQC on internet-facing links, ensure business continuity [5]. Both ends must support same algorithms [3]. TLS 1.3 first step [3].
+4. **Measure PQC observability**: Track encaps/decaps ms, `success_rate = decaps_ok/(ok+fail)`, `fallback_local`, via health 6001/5001 and DB analytics — KPIs for migration progress. Choose param set based on cover time: 512 for short-lived telemetry 1-2y, 768 default [2], 1024 for NSA CNSA 2.0 national security 25y+ [2].
+5. **Plan key management upgrades** (per-device subkeys, sign pk file, KMS, rotation) and hardware replacement budget.
 
-As Group 23, our system demonstrates that even a small team with LLM assistance can build a working hybrid PQC system (33/33 tests, SQLite analytics, fallback for legacy availability) — proving organizational transition is feasible if started now, before 2030 deadline [3].
+As Group 23, our system demonstrates that even a small team with LLM assistance can build a working hybrid PQC system (33/33 tests, SQLite analytics, fallback for legacy availability) — proving organizational transition is feasible if started now, before 2030 deadline [3]. Cover time concept shows why waiting is risky: data you send today with 20y cover time will be exposed 16 years early if you wait until quantum arrives.
 
 ---
 
