@@ -1,4 +1,4 @@
-# Oulu Software DEV-Maintenance-Ops Project Group 23 — Hybrid Traditional & Post-Quantum Cryptography Compatible Sensor-EdgeGateway-Cloud System
+# Oulu Software DEV-Maintenance-Ops Project Group 23 - Hybrid Traditional & Post-Quantum Cryptography Compatible Sensor-EdgeGateway-Cloud System
 * **Members:** Kaiquan Mah | Quoc Nguyen | Danish Sharjeel | Manh Nguyen | Kim Nguyen  
 * **Python:** 3.13, package manager `uv`, deps `cryptography>=50.0.1`, `mlkem>=0.0.3`  
 * **Tests:** 33 passed (was 27/33 baseline)
@@ -43,21 +43,21 @@ Wire formats:
 uv sync --frozen --all-groups  # respects pyproject.toml + uv.lock + .python-version
 ```
 
-**Terminal 1 — Cloud (6000 data + 6001 health):**
+**Terminal 1 - Cloud (6000 data + 6001 health):**
 ```bash
 uv run python src/cloud_service.py
 # Generates cloud_public_key.bin (800B) + telemetry.db
 # Health: http://127.0.0.1:6001/health
 ```
 
-**Terminal 2 — Gateway (5000 legacy + 5001 health):**
+**Terminal 2 - Gateway (5000 legacy + 5001 health):**
 ```bash
 uv run python src/edge_gateway.py
 # Listens 5000 + health 5001, forwards to cloud via PQC
 # If cloud_public_key.bin missing or cloud down → fallback to gateway_fallback.log
 ```
 
-**Terminal 3 — Legacy:**
+**Terminal 3 - Legacy:**
 ```bash
 uv run python src/legacy_device.py
 # Sends AES-GCM encrypted telemetry to gateway
@@ -97,14 +97,13 @@ uv run python src/pqc_utils.py
 
 ## Documentation (Part1)
 
-- `documentation/00_4h_gaps_analysis_n_scope_plan.md` — 4h scope plan on 2026.10.10 to understand gaps in our codebase and work done over the weekend to cover those gaps further
-- `documentation/01_baseline_analysis.md` — baseline 2-tier architecture (legacy device and gateway), 27/33 tests passed
-- `documentation/02_design_decisions_n_key_llm_interactions.md` — 10 LLM interactions with accepted/modified/rejected user indications
-- `documentation/03_mlkem_integration.md` — ML-KEM-512 hybrid design
+- `documentation/01_baseline_analysis.md` - baseline 2-tier architecture (legacy device and gateway), 27/33 tests passed
+- `documentation/02_design_decisions_n_key_llm_interactions.md` - 10 LLM interactions with accepted/modified/rejected user indications
+- `documentation/03_mlkem_integration.md` - ML-KEM-512 hybrid design
 - `documentation/04_migration_fallback_strategy.md`
-- `documentation/05_operations.md` — CI/CD, Dockerfile, docker-compose (healthchecks, volumes), logging file-only to keep tests clean, metrics, health 5001/6001, PQC observability, DB analytics (on sqlite DB)
-- `documentation/06_final_evaluation.md` — acronym glossary, strengths, weaknesses & technical debt, risks
-- `documentation/part1_documentation.md` — **consolidated documentation for peer review** which includes requirements, architecture, design decisions, implementation, testing, operations, final evaluation of technical debt, references
+- `documentation/05_operations.md` - CI/CD, Dockerfile, docker-compose (healthchecks, volumes), logging file-only to keep tests clean, metrics, health 5001/6001, PQC observability, DB analytics (on sqlite DB)
+- `documentation/06_final_evaluation.md` - acronym glossary, strengths, weaknesses & technical debt, risks
+- `documentation/part1_documentation.md` - **consolidated documentation for peer review** which includes requirements, architecture, design decisions, implementation, testing, operations, final evaluation of technical debt, references
 
 
 ## CI/CD
@@ -112,7 +111,7 @@ uv run python src/pqc_utils.py
 - `.github/workflows/ci.yml` on push to `main`/`arena/*` + PRs:
   - `test` job: `setup-uv` reads `.python-version` 3.13 + `uv.lock`, `uv sync --frozen --all-groups`, `uv pip install pytest`, `PYTHONPATH` set, `pytest -v` 33 tests, `pqc_utils.py` round-trip, import checks for both `src.*` and top-level
   - `docker-build` job: `needs: test`, `docker build -t edge-gateway:test .` verifies Dockerfile respects `pyproject.toml+uv.lock+.python-version`
-- `Dockerfile` implicit convention: `build: .` in compose = `build: {context: ., dockerfile: Dockerfile}` implicit, `docker build .` = `docker build -f Dockerfile .` implicit — both read `./Dockerfile` without mentioning name
+- `Dockerfile` implicit convention: `build: .` in compose = `build: {context: ., dockerfile: Dockerfile}` implicit, `docker build .` = `docker build -f Dockerfile .` implicit - both read `./Dockerfile` without mentioning name
 - Runtime table: `pyproject.toml+uv.lock+.python-version` used local+CI+Docker, `Dockerfile` used local Docker+CI docker-build, `docker-compose.yml` local only, `ci.yml` GitHub only
 
 

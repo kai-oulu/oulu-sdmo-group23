@@ -2,7 +2,7 @@
 
 ## 0. Acronyms
 - **PQC = Post-Quantum Cryptography**: new crypto that resists quantum computers
-- **ML-KEM = Module-Lattice-based Key Encapsulation Mechanism** (NIST FIPS 203, based on CRYSTALS-Kyber): a PQC algorithm to agree on a secret key
+- **ML-KEM = Module-Lattice-based Key Encapsulation Mechanism** (NIST FIPS 203): a PQC algorithm to agree on a secret key
 - **KEM = Key Encapsulation Mechanism**: method where one side encrypts a random secret with public key, other side decrypts it
 - **PSK = Pre-Shared Key**: same secret key flashed into all devices at factory, used for AES
 - **AES-GCM = Advanced Encryption Standard - Galois/Counter Mode**: symmetric encryption that gives confidentiality + integrity tag
