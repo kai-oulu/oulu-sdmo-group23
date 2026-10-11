@@ -2,6 +2,7 @@
 * **Members:** Kaiquan Mah | Quoc Nguyen | Danish Sharjeel | Manh Nguyen | Kim Nguyen  
 * **Python:** 3.13, package manager `uv`, deps `cryptography>=50.0.1`, `mlkem>=0.0.3`  
 * **Tests:** 33 passed (was 27/33 baseline)
+* **Repository** is accessible from: https://github.com/kai-oulu/oulu-sdmo-group23/tree/main
 
 
 ## Project Overview
@@ -13,7 +14,7 @@ Create then modernize a 2-tier legacy sensor system (simulated ATmega328P → ga
 - **Cloud:** SQLite `telemetry.db` + analytics (COUNT, AVG temp/humidity, last 10, PQC success rate) via health 6001
 - **Gateway health:** 5001 metrics (received/rejected/replayed/forwarded/fallback)
 
-**Why offload PQC to gateway:** ATmega328P 2KB SRAM cannot hold ML-KEM-512 sk 1632B + workspace 1000-1500B = ~3KB → stack overflow. Gateway (Linux/Pi) has enough RAM, encaps 0.03ms Rust / 0.82ms pure Python, decaps 0.04ms / 1.46ms negligible.
+**Why offload PQC to gateway:** ATmega328P 2KB SRAM cannot hold ML-KEM-512 sk 1632B + workspace 1000-1500B = ~3KB → stack overflow. Gateway (Linux/Pi) has enough RAM, encaps 0.03ms, decaps 0.04ms negligible.
 
 
 ## Architecture
@@ -97,13 +98,13 @@ uv run python src/pqc_utils.py
 
 ## Documentation (Part1)
 
-- `documentation/01_baseline_analysis.md` - baseline 2-tier architecture (legacy device and gateway), 27/33 tests passed, measurements, gap analysis
-- `documentation/02_design_decisions_n_key_llm_interactions.md` - 10 LLM interactions + 3 CI fixes, with prompts, outputs, accepted/modified/rejected, verification
-- `documentation/03_mlkem_integration.md` - ML-KEM-512 hybrid design, library choice, param sets, wire format, file-based pk distribution, dual-wheel fix, PQC observability
-- `documentation/04_migration_fallback_strategy.md` - phased migration Phase0/1/2, fallback table, legacy compatibility, business continuity
-- `documentation/05_operations.md` - CI/CD, Dockerfile implicit convention, docker-compose (healthchecks, volumes), logging file-only, metrics, health 5001/6001, PQC observability, DB analytics
-- `documentation/06_final_evaluation.md` - v3 with acronym glossary, strengths with E2E evidence, weaknesses & tech debt combined table with why it matters, risks R1-R7 consolidated, what-if-not-fully-integrated
-- `documentation/part1_documentation.md` - **consolidated documentation for peer review** which includes full details from 01-06 + README + codebase, so reviewers can refer only to part1_documentation.md if they wish
+- `documentation/01_baseline_analysis.md` - baseline 2-tier architecture (legacy device and gateway), 27/33 tests passed
+- `documentation/02_design_decisions_n_key_llm_interactions.md` - 10 LLM interactions with accepted/modified/rejected user indications
+- `documentation/03_mlkem_integration.md` - ML-KEM-512 hybrid design
+- `documentation/04_migration_fallback_strategy.md`
+- `documentation/05_operations.md` - CI/CD, Dockerfile, docker-compose (healthchecks, volumes), logging file-only to keep tests clean, metrics, health 5001/6001, PQC observability, DB analytics (on sqlite DB)
+- `documentation/06_final_evaluation.md` - acronym glossary, strengths, weaknesses & technical debt, risks
+- `documentation/part1_documentation.md` - **consolidated documentation for peer review** which includes requirements, architecture, design decisions, implementation, testing, operations, final evaluation of technical debt, references
 
 
 ## CI/CD
@@ -117,10 +118,10 @@ uv run python src/pqc_utils.py
 
 ## Team
 
-* Kaiquan Mah (cloud service/logging/db/analytics, ML-KEM/PQC implementation/migration with AES fallback (if PQC is not supported), docker, CI-CD via GitHub Actions, documentation, dual-wheel fix for Rust vs pure Python mlkem wheels, CI fixes for ModuleNotFoundError src, NameError os)
-* Quoc Nguyen (tests, baseline analysis, test plan generation)
-* Danish Sharjeel (initial legacy device and edge gateway code and its documentation, gateway hardening, security)
-* Manh Nguyen (cloud+DB+analytics, SQLite, health endpoints)
-* Kim Nguyen (migration/fallback strategy, docs, team coordination)
+* Kaiquan Mah ("cloud service"/logging/db/analysis, ML-KEM/PQC implementation/migration with AES fallback (if PQC is not supported), docker, CI-CD via GitHub Actions, documentation)
+* Quoc Nguyen (tests)
+* Danish Sharjeel (initial legacy device and edge gateway code and its documentation)
+* Manh Nguyen
+* Kim Nguyen
 
 Copyright © 2026. All rights reserved.
