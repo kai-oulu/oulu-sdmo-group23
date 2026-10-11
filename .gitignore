@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project specific - PQC and DB artifacts (simple simulation)
+telemetry.db
+*.db
+*.bin
+gateway_fallback.log
+pqc.log
+cloud.log
+gateway.log
+data/
