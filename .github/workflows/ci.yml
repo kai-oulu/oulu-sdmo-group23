@@ -38,13 +38,23 @@ jobs:
 
       - name: Sync dependencies from pyproject.toml + uv.lock (frozen)
         run: |
-          uv sync --frozen
-          # --frozen means use exact versions from uv.lock, don't update lock
-          # This respects pyproject.toml dependencies (cryptography>=50.0.1, mlkem>=0.0.3)
-          # and uv.lock locked versions (e.g., cffi 2.1.1, etc.)
-          # For local dev you would run `uv sync` without --frozen
-          # Install pytest as dev tool (not in uv.lock main deps, but in [dependency-groups].dev)
+          # 2026.10.10
+          # uv sync --frozen
+          # # --frozen means use exact versions from uv.lock, don't update lock
+          # # This respects pyproject.toml dependencies (cryptography>=50.0.1, mlkem>=0.0.3)
+          # # and uv.lock locked versions (e.g., cffi 2.1.1, etc.)
+          # # For local dev you would run `uv sync` without --frozen
+          # # Install pytest as dev tool (not in uv.lock main deps, but in [dependency-groups].dev)
+          # uv pip install pytest
+
+          # 2026.10.11 FIX for CI error ModuleNotFoundError: No module named 'src':
+          # - Previously `uv sync --frozen` only installed main deps (cryptography, mlkem), not dev group (pytest)
+          # - Then `uv pip install pytest` installed pytest via pip, but did not ensure src/ and project root in PYTHONPATH
+          # - Now use --all-groups to install dev deps via uv.lock, and also install pytest via pip as fallback
+          uv sync --frozen --all-groups
           uv pip install pytest
+          uv run python -c "import cryptography; import mlkem; print('deps ok:', cryptography.__version__, mlkem.__file__)"
+
 
       - name: Run tests (33 tests) via uv
         run: |

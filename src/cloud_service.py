@@ -21,6 +21,17 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 # Import PQC utils with fallback for local vs module execution
 # When run as `python src/cloud_service.py` from root, src is in path, so `import pqc_utils` works
 # When run as `python -m src.cloud_service`, need `from src.pqc_utils import ...`
+#   Import PQC utils with robust fallback (same fix as edge_gateway.py)
+#   2026.10.11 FIX EXPLANATION: same CI error - ensure both src/ and project root in sys.path, and don't mask dependency errors
+import sys
+
+_SRC_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _SRC_DIR.parent
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 try:
     from pqc_utils import (
         CLOUD_PK_PATH,
@@ -30,7 +41,9 @@ try:
         generate_keypair,
         get_mlkem_instance,
     )
-except ImportError:
+except ModuleNotFoundError as e:
+    if "pqc_utils" not in str(e):
+        raise
     from src.pqc_utils import (
         CLOUD_PK_PATH,
         CT_LEN,

@@ -15,6 +15,9 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIRECTORY = PROJECT_ROOT / "src"
+# 2026.10.11 FIX: insert BOTH project root and src/ so `import pqc_utils` and `import src.pqc_utils` both work in CI
+# Previously only src/ was in path, so fallback `from src.pqc_utils import ...` inside edge_gateway failed with No module named 'src'
+sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(SOURCE_DIRECTORY))
 
 import edge_gateway  # noqa: E402

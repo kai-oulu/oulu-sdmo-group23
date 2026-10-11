@@ -24,9 +24,22 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 # Import PQC utils with fallback for both local and Docker execution
 # When run as `python src/edge_gateway.py` from root, src is in path, so `import pqc_utils` works
 # When run as `python -m src.edge_gateway`, need `from src.pqc_utils import ...`
+
+# 2026.10.11 Ensures both src/ and project root in path, so both import styles work. 
+# Only fallback when error is specifically pqc_utils not found, not when its dependency missing — so original error not masked.
+import sys
+_SRC_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _SRC_DIR.parent
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 try:
     from pqc_utils import CLOUD_PK_PATH, encrypt_for_cloud, load_public_key
-except ImportError:
+except ModuleNotFoundError as e:
+    if "pqc_utils" not in str(e):  # don't hide mlkem/cryptography missing
+        raise
     from src.pqc_utils import CLOUD_PK_PATH, encrypt_for_cloud, load_public_key
 #############################
 
