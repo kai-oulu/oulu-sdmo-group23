@@ -18,6 +18,17 @@ For organizations with thousands of low-cost sensors, they cannot replace all th
 
 If your data needs **5+ years of confidentiality** (medical records, IP, financial, government secrets), migration is already overdue. EU notes with CRQC (cryptographically relevant quantum computer) predicted by 2030, if cover time is 5 years or more, it is already too late for many to move in time [3]. For such data, "harvest now, decrypt later" means traffic captured today can be decrypted retroactively once quantum arrives [2].
 
+**What is cover time? (simple explanation for non-CS):**
+- **Cover time = how long you need your data to stay secret.** Think of it as expiry date for confidentiality.
+  - Medical record: needs 20+ years secret (patient privacy law)
+  - Bank transaction / trade secret / IP: 7-10 years
+  - Sensor telemetry for factory: maybe 1-2 years (short-lived)
+  - Government secret: 25+ years
+- **Why it matters with quantum:** Attacker can do "harvest now, decrypt later" — they don't need quantum computer today. They just **record your encrypted traffic now** (like copying a locked safe) and **store it**. When quantum computer arrives in 2030 that can pick old RSA/ECC locks, they **open the safe and read the old data** [2][5].
+- **Example timeline:** Today is 2026. You send medical data encrypted with RSA. Attacker records it. Quantum computer arrives 2030 (4 years later). If that medical data needs 20 years cover time (until 2046), attacker in 2030 can decrypt data that should have stayed secret until 2046 — **16 years too early**. So even though quantum is 4 years away, your 20-year data is already at risk today [3].
+- **Rule of thumb for executives:** `If (cover time + migration time) > (time until CRQC)`, you are already late. Migration itself takes 10-20 years [3], so if CRQC by 2030 (4 years away) and migration takes 10 years, any data needing >0 years confidentiality is at risk. That's why CISA says start inventory now [5].
+- **Our system example:** Our temperature telemetry maybe needs 1-2 years cover time (short-lived) — so 512-bit (~AES-128) is enough [1]. But if same system collected health data, we should use ML-KEM-768 or 1024 for longer cover time [1][2].
+
 Our group's system (in the [GitHub repo](https://github.com/kai-oulu/oulu-sdmo-group23/tree/main)) is a minimal but working example of this hybrid deployment approach: legacy sensors retain the lightweight AES encryption method when communicating with the edge gateway, and the edge gateway communicates with the cloud service protected by Post-Quantum Cryptography, with a SQLite database for analytics and fallback logging via files for business continuity. It shows how an organization can start now and migrate to using Post-Quantum Cryptography without disrupting operations.
 
 ---
@@ -40,7 +51,7 @@ CISA's Post-Quantum Cryptography initiative shares a phased, risk-based migratio
 
 1. **Inventory:** List all systems performing cryptography - including hidden IoT sensors, gateways, cloud APIs. Most organizations discover 60-80% more cryptography use than expected (inventory challenge). **Include non-production:** internal APIs, test/dev platforms are often overlooked and frequently targeted precisely because they lag behind in security [3]. EU emphasizes first mapping and creating an inventory of cryptographic systems [3]. CISA recommends **Automated Cryptographic Discovery and Inventory (ACDI) Tools** to automate this [5]. Maintaining a detailed cryptographic asset register is essential to assess risk at each endpoint [3].
 
-2. **Risk assessment:** Identify data with long secrecy lifetime (medical, financial, critical infrastructure telemetry) at risk from the "harvest now, decrypt later" concept [5]. Consider **cover time**: if data needs 5+ years confidentiality and CRQC arrives by 2030, you are already late [3].
+2. **Risk assessment:** Identify data with long secrecy lifetime (medical, financial, critical infrastructure telemetry) at risk from the "harvest now, decrypt later" concept [5]. **Use cover time to prioritize:** List each data type, ask "how many years must this stay secret?" — medical 20y, financial 7-10y, IP 10y, telemetry 1-2y. If cover time extends beyond 2030 (predicted CRQC), that data is already at risk from traffic captured today [2][3]. Example: medical record sent in 2026 needs secrecy until 2046 (20y cover time). Attacker records encrypted traffic in 2026, decrypts in 2030 with quantum, reads data 16 years before it should be public. So prioritize long cover time data first [3].
 
 3. **Approach:** Prioritize internet-facing communication links first (e.g. gateway to cloud communication links), then internal communication links. EU recommends a hybrid approach to keep legacy sensor devices working during the transition [3]. **TLS 1.3 should be first step** as it provides necessary foundation for future PQC support [3].
 
