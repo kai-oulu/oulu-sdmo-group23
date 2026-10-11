@@ -3,8 +3,8 @@
 **Perspective 3: Information security and organizational cybersecurity**  
 **Course:** Oulu Software DEV-Maintenance-Ops - Group 23  
 **Members:** Kaiquan Mah | Quoc Nguyen | Danish Sharjeel | Manh Nguyen | Kim Nguyen  
-**Note:** This report is written from the perspective of someone not from a Computer Science background. Technical details from `part1_documentation.md` are summarised using simpler language where possible.
-**Repository** is accessible from: https://github.com/kai-oulu/oulu-sdmo-group23/tree/main
+**Note:** This report is written from the perspective of someone not from a Computer Science background. Technical details from `part1_documentation.md` are summarised using simpler language where possible  
+**Repository is accessible from:** https://github.com/kai-oulu/oulu-sdmo-group23/tree/main
 
 ---
 
