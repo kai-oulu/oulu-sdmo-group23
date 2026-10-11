@@ -211,7 +211,7 @@ Wire Link2: `ct(768) + nonce(12) + aes_ciphertext+tag`, hybrid AES-256-GCM with 
 - [x] New `05_operations.md` — DONE 142 lines
 - [x] New `06_final_evaluation.md` — DONE 79 lines v3 with acronyms, strengths with evidence, weaknesses & tech debt combined table, R1-R7, what-if
 - [x] Update README — DONE hybrid title + team roles Kaiquan Mah | Quoc Nguyen | Danish Sharjeel | Manh Nguyen | Kim Nguyen, 126 lines
-- [ ] Draft `report_perspective3_draft.md` (max 5 pages, C-suite friendly) — NEXT, research plan below
+- [x] Draft `report_perspective3_draft.md` (max 5 pages, C-suite friendly) — DONE: `documentation/part2_report.md` created 156 lines ~2200 words, title Post-Quantum Cryptography Transition from an Organisation Information/Cyber Security Perspective, Perspective 3, uses 5 refs from Part1, includes high-level hybrid codebase info (Link1 AES 16B PSK 28B overhead 2KB SRAM vs 3KB, Link2 ML-KEM-512 800B pk 768B ct 845B total, fallback log, DB analytics), C-suite non-CS analogies, pushed to arena fc0b2ab
 
 ### What to SKIP to stay in 4h
 - No per-device subkeys (global PSK, doc as debt)
