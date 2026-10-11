@@ -11,9 +11,55 @@ import os
 import time
 from pathlib import Path
 from typing import Tuple
-
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from mlkem import ML_KEM, ParameterSet
+
+# --- Robust mlkem import for CI compatibility ---
+# FIX EXPLANATION for CI error: ImportError: cannot import name 'ML_KEM' from 'mlkem'
+# - mlkem 0.0.3 has TWO distributions with same version:
+#   * Rust binding: `mlkem/__init__.py` contains `from mlkem.rust import ML_KEM, ParameterSet, EncapsKey, DecapsKey`
+#     -> `from mlkem import ML_KEM` works, has rust.so
+#   * Pure Python: `mlkem/__init__.py` is EMPTY (0 bytes), has fastmath.so
+#     -> `from mlkem import ML_KEM` FAILS, need `from mlkem.ml_kem import ML_KEM` and `from mlkem.parameter_set import ParameterSet, ML_KEM_512`
+# - Local dev (/tmp/venv Python 3.11) pip installed Rust binding wheel (has rust module)
+# - CI (Python 3.13, ubuntu-latest) pip installed pure Python wheel (empty __init__.py, fastmath)
+# - Both are valid mlkem 0.0.3 but API differs
+# - FIX: try Rust first, fallback to pure Python, set flag RUST_BINDING
+
+RUST_BINDING = False
+ML_KEM = None
+ParameterSet = None
+EncapsKey = None
+DecapsKey = None
+ML_KEM_512_CONST = None  # For pure Python version
+
+try:
+    # Try Rust binding version (has rust module)
+    from mlkem import ML_KEM as _ML_KEM, ParameterSet as _ParameterSet
+    from mlkem import EncapsKey as _EncapsKey, DecapsKey as _DecapsKey
+
+    ML_KEM = _ML_KEM
+    ParameterSet = _ParameterSet
+    EncapsKey = _EncapsKey
+    DecapsKey = _DecapsKey
+    RUST_BINDING = True
+    logging.getLogger().info("mlkem: using Rust binding version")
+except ImportError as e_rust:
+    # Fallback to pure Python version (empty __init__.py)
+    try:
+        from mlkem.ml_kem import ML_KEM as _ML_KEM
+        from mlkem.parameter_set import ParameterSet as _ParameterSet
+        from mlkem.parameter_set import ML_KEM_512 as _ML_KEM_512
+
+        ML_KEM = _ML_KEM
+        ParameterSet = _ParameterSet
+        ML_KEM_512_CONST = _ML_KEM_512
+        RUST_BINDING = False
+        logging.getLogger().info(f"mlkem: using pure Python version (fallback from Rust error: {e_rust})")
+    except ImportError as e_pure:
+        raise ImportError(
+            f"mlkem library not found or incompatible. Tried Rust binding (error: {e_rust}) "
+            f"and pure Python (error: {e_pure}). Install with `pip install mlkem==0.0.3`"
+        )
 
 # Constants for ML-KEM-512 (lightest, suitable for gateway)
 PK_LEN = 800  # Encaps key (public) length
@@ -22,7 +68,7 @@ CT_LEN = 768  # Ciphertext length
 SS_LEN = 32  # Shared secret length
 NONCE_LEN = 12  # AES-GCM nonce
 
-CLOUD_PK_PATH = Path("cloud_public_key.bin")
+CLOUD_PK_PATH = Path(os.getenv("CLOUD_PK_PATH", "cloud_public_key.bin"))
 
 # Use file logging to avoid polluting stdout in tests
 logging.basicConfig(
@@ -33,10 +79,24 @@ logging.basicConfig(
     ],
 )
 
-
 def get_mlkem_instance():
-    """Get ML-KEM-512 instance"""
-    return ML_KEM(ParameterSet.ML_KEM_512)
+    """Get ML-KEM-512 instance - works for both Rust and pure Python versions"""
+    if RUST_BINDING:
+        # Rust version: ParameterSet.ML_KEM_512 enum
+        try:
+            return ML_KEM(ParameterSet.ML_KEM_512)
+        except AttributeError:
+            # Some Rust versions use ParameterSet.ML_KEM_512, others use ML_KEM_512 constant
+            # Try fallback
+            if ML_KEM_512_CONST is not None:
+                return ML_KEM(ML_KEM_512_CONST)
+            # Try direct
+            from mlkem.parameter_set import ML_KEM_512
+
+            return ML_KEM(ML_KEM_512)
+    else:
+        # Pure Python version: ML_KEM_512 is ParameterSet object
+        return ML_KEM(ML_KEM_512_CONST)
 
 
 def generate_keypair(
@@ -47,10 +107,17 @@ def generate_keypair(
     Returns (ek_bytes, dk_bytes, mlkem_obj)
     ek = encaps key (public, 800B), dk = decaps key (secret, 1632B)
     """
+
     mlkem_obj = get_mlkem_instance()
-    ek, dk = mlkem_obj.key_gen()  # ek is EncapsKey, dk is DecapsKey
-    ek_bytes = ek.to_bytes()
-    dk_bytes = dk.to_bytes()
+
+    if RUST_BINDING:
+        # Rust: key_gen() returns (EncapsKey, DecapsKey) objects
+        ek, dk = mlkem_obj.key_gen()  # ek is EncapsKey, dk is DecapsKey
+        ek_bytes = ek.to_bytes()
+        dk_bytes = dk.to_bytes()
+    else:
+        # Pure Python: key_gen() returns (ek_bytes, dk_bytes) directly as bytes
+        ek_bytes, dk_bytes = mlkem_obj.key_gen()
 
     assert len(ek_bytes) == PK_LEN, f"Unexpected pk len {len(ek_bytes)}"
     assert len(dk_bytes) == SK_LEN, f"Unexpected sk len {len(dk_bytes)}"
@@ -82,20 +149,27 @@ def encrypt_for_cloud(plaintext: bytes, ek_bytes: bytes) -> Tuple[bytes, dict]:
     """
     start = time.time()
 
-    # Load ek from bytes and encaps
-    from mlkem import EncapsKey
 
-    mlkem_obj = get_mlkem_instance()
-    # EncapsKey.from_bytes needs param set? Try without, fallback with param
-    try:
-        ek = EncapsKey.from_bytes(ek_bytes)
-    except TypeError:
-        # Some versions require param set
-        ek = EncapsKey.from_bytes(ek_bytes, ParameterSet.ML_KEM_512)
+    if RUST_BINDING:
+        # Rust: need EncapsKey object
+        try:
+            ek = EncapsKey.from_bytes(ek_bytes)
+        except TypeError:
+            try:
+                ek = EncapsKey.from_bytes(ek_bytes, ParameterSet.ML_KEM_512)
+            except Exception:
+                # Some versions need constant
+                from mlkem.parameter_set import ML_KEM_512
 
-    encaps_start = time.time()
-    ss, ct = mlkem_obj.encaps(ek)
-    encaps_ms = (time.time() - encaps_start) * 1000
+                ek = EncapsKey.from_bytes(ek_bytes, ML_KEM_512)
+        encaps_start = time.time()
+        ss, ct = mlkem_obj.encaps(ek)
+        encaps_ms = (time.time() - encaps_start) * 1000
+    else:
+        # Pure Python: ek_bytes directly
+        encaps_start = time.time()
+        ss, ct = mlkem_obj.encaps(ek_bytes)
+        encaps_ms = (time.time() - encaps_start) * 1000
 
     assert len(ss) == SS_LEN
     assert len(ct) == CT_LEN
@@ -150,14 +224,23 @@ def decrypt_from_gateway(
     if mlkem_obj is None:
         mlkem_obj = get_mlkem_instance()
 
-    try:
-        dk = DecapsKey.from_bytes(dk_bytes)
-    except TypeError:
-        dk = DecapsKey.from_bytes(dk_bytes, ParameterSet.ML_KEM_512)
+    if RUST_BINDING:
+        try:
+            dk = DecapsKey.from_bytes(dk_bytes)
+        except TypeError:
+            try:
+                dk = DecapsKey.from_bytes(dk_bytes, ParameterSet.ML_KEM_512)
+            except Exception:
+                from mlkem.parameter_set import ML_KEM_512
 
-    decaps_start = time.time()
-    ss = mlkem_obj.decaps(dk, ct)
-    decaps_ms = (time.time() - decaps_start) * 1000
+                dk = DecapsKey.from_bytes(dk_bytes, ML_KEM_512)
+        decaps_start = time.time()
+        ss = mlkem_obj.decaps(dk, ct)
+        decaps_ms = (time.time() - decaps_start) * 1000
+    else:
+        decaps_start = time.time()
+        ss = mlkem_obj.decaps(dk_bytes, ct)
+        decaps_ms = (time.time() - decaps_start) * 1000
 
     assert len(ss) == SS_LEN
 
