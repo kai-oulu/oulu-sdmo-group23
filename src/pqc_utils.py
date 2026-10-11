@@ -2,8 +2,10 @@
 Created 2026.10.10
 PQC Utilities for ML-KEM-512 hybrid encryption (Link 2: Gateway -> Cloud)
 - Uses mlkem library (Rust binding) with NIST FIPS 203 ML-KEM-512
+- Supports BOTH Rust binding (fast, has mlkem.rust) and pure Python (fastmath) versions
 - Hybrid pattern: ML-KEM encaps -> 32B shared secret -> AES-256-GCM encrypt telemetry
 - Wire format: ct(768) || nonce(12) || aes_ciphertext+tag
+- Simple DB and observability handled in cloud_service.py
 """
 
 import logging
@@ -62,10 +64,10 @@ except ImportError as e_rust:
         )
 
 # Constants for ML-KEM-512 (lightest, suitable for gateway)
-PK_LEN = 800  # Encaps key (public) length
-SK_LEN = 1632  # Decaps key (secret) length
-CT_LEN = 768  # Ciphertext length
-SS_LEN = 32  # Shared secret length
+PK_LEN = 800    # Encaps key (public) length
+SK_LEN = 1632   # Decaps key (secret) length
+CT_LEN = 768    # Ciphertext length
+SS_LEN = 32     # Shared secret length
 NONCE_LEN = 12  # AES-GCM nonce
 
 CLOUD_PK_PATH = Path(os.getenv("CLOUD_PK_PATH", "cloud_public_key.bin"))
@@ -101,11 +103,12 @@ def get_mlkem_instance():
 
 def generate_keypair(
     save_path: Path = CLOUD_PK_PATH,
-) -> Tuple[bytes, bytes, ML_KEM]:
+) -> Tuple[bytes, bytes, object]:
     """
     Generate ML-KEM-512 keypair and save public key to file.
     Returns (ek_bytes, dk_bytes, mlkem_obj)
     ek = encaps key (public, 800B), dk = decaps key (secret, 1632B)
+    Works for both Rust and pure Python versions.
     """
 
     mlkem_obj = get_mlkem_instance()
@@ -123,21 +126,36 @@ def generate_keypair(
     assert len(dk_bytes) == SK_LEN, f"Unexpected sk len {len(dk_bytes)}"
 
     # Save public key for gateway to read (file-based distribution - Phase1)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
     save_path.write_bytes(ek_bytes)
     logging.info(
-        f"Generated ML-KEM-512 keypair: pk {len(ek_bytes)}B saved to {save_path}, sk {len(dk_bytes)}B in memory"
+        f"Generated ML-KEM-512 keypair (rust={RUST_BINDING}): pk {len(ek_bytes)}B saved to {save_path}, sk {len(dk_bytes)}B in memory"
     )
     return ek_bytes, dk_bytes, mlkem_obj
 
 
 def load_public_key(path: Path = CLOUD_PK_PATH) -> bytes:
-    """Load public key from file"""
-    if not path.exists():
-        raise FileNotFoundError(f"Public key file not found: {path}")
-    data = path.read_bytes()
-    if len(data) != PK_LEN:
-        raise ValueError(f"Invalid pk length {len(data)}, expected {PK_LEN}")
-    return data
+    """Load public key from file - tries multiple locations for Docker"""
+    if path.exists():
+        data = path.read_bytes()
+        if len(data) != PK_LEN:
+            raise ValueError(f"Invalid pk length {len(data)}, expected {PK_LEN}")
+        return data
+
+    fallback_paths = [
+        Path("cloud_public_key.bin"),
+        Path("shared/cloud_public_key.bin"),
+        Path("/app/shared/cloud_public_key.bin"),
+        Path("./shared/cloud_public_key.bin"),
+    ]
+    for fp in fallback_paths:
+        if fp.exists() and fp != path:
+            logging.info(f"Public key not at {path}, found at fallback {fp}")
+            data = fp.read_bytes()
+            if len(data) == PK_LEN:
+                return data
+
+    raise FileNotFoundError(f"Public key file not found: {path} (tried fallbacks {fallback_paths})")
 
 
 def encrypt_for_cloud(plaintext: bytes, ek_bytes: bytes) -> Tuple[bytes, dict]:
@@ -146,9 +164,10 @@ def encrypt_for_cloud(plaintext: bytes, ek_bytes: bytes) -> Tuple[bytes, dict]:
     Returns (packet, metrics)
     packet = ct(768) || nonce(12) || aes_ct+tag
     metrics = {encaps_ms, aes_encrypt_ms, ct_len, total_len}
+    Works for both Rust and pure Python mlkem versions.
     """
     start = time.time()
-
+    mlkem_obj = get_mlkem_instance()
 
     if RUST_BINDING:
         # Rust: need EncapsKey object
@@ -193,34 +212,34 @@ def encrypt_for_cloud(plaintext: bytes, ek_bytes: bytes) -> Tuple[bytes, dict]:
         "aes_ct_len": len(aes_ct),
         "total_len": len(packet),
         "ss_len": len(ss),
+        "rust_binding": RUST_BINDING,
     }
 
     logging.info(
-        f"PQC encrypt: encaps {metrics['encaps_ms']}ms, AES {metrics['aes_encrypt_ms']}ms, total {len(packet)}B (ct 768 + nonce 12 + aes {len(aes_ct)})"
+        f"PQC encrypt (rust={RUST_BINDING}): encaps {metrics['encaps_ms']}ms, AES {metrics['aes_encrypt_ms']}ms, total {len(packet)}B"
     )
 
     return packet, metrics
 
 
 def decrypt_from_gateway(
-    packet: bytes, dk_bytes: bytes, mlkem_obj: ML_KEM = None
+    packet: bytes, dk_bytes: bytes, mlkem_obj=None
 ) -> Tuple[bytes, dict]:
     """
     Hybrid decrypt: split packet, decaps ct -> ss, AES-GCM decrypt
+    works for both Rust and pure Python
     Returns (plaintext, metrics)
     """
     start = time.time()
 
-    if len(packet) < CT_LEN + NONCE_LEN + 16:  # 16 is min tag
-        raise ValueError(f"Packet too short {len(packet)}")
+    if len(packet) < CT_LEN + NONCE_LEN + 16:
+        raise ValueError(f"Packet too short {len(packet)}, expected at least {CT_LEN+NONCE_LEN+16}")
 
     ct = packet[:CT_LEN]
     nonce = packet[CT_LEN : CT_LEN + NONCE_LEN]
     aes_ct = packet[CT_LEN + NONCE_LEN :]
 
     # Decaps
-    from mlkem import DecapsKey
-
     if mlkem_obj is None:
         mlkem_obj = get_mlkem_instance()
 
@@ -257,10 +276,11 @@ def decrypt_from_gateway(
         "total_ms": round(total_ms, 2),
         "ct_len": len(ct),
         "total_len": len(packet),
+        "rust_binding": RUST_BINDING,
     }
 
     logging.info(
-        f"PQC decrypt: decaps {metrics['decaps_ms']}ms, AES {metrics['aes_decrypt_ms']}ms, total {len(packet)}B"
+        f"PQC decrypt (rust={RUST_BINDING}): decaps {metrics['decaps_ms']}ms, AES {metrics['aes_decrypt_ms']}ms, total {len(packet)}B"
     )
 
     return plaintext, metrics
@@ -268,7 +288,7 @@ def decrypt_from_gateway(
 
 # Simple self-test when run directly
 if __name__ == "__main__":
-    print("Testing PQC utils round-trip...")
+    print(f"Testing PQC utils round-trip (rust_binding={RUST_BINDING})...")
     ek_b, dk_b, mlkem_o = generate_keypair(Path("/tmp/test_pk.bin"))
     msg = b'{"device_id":"sensor-node-01","temperature":21.8}'
     pkt, enc_metrics = encrypt_for_cloud(msg, ek_b)
