@@ -15,7 +15,8 @@
 - [x] Step 3 Ops (Docker, CI) — DONE: CI yml with test + docker build jobs, Dockerfile simple python:3.13-slim with HEALTHCHECK, docker-compose with cloud+gateway, healthchecks, volumes for pk sharing, now respects pyproject.toml + uv.lock + .python-version (setup-uv, uv sync --frozen)
 - [x] Step 4 Docs consolidation + Part1 final — DONE (Part1): Created 03_mlkem_integration.md, 04_migration_fallback_strategy.md, 05_operations.md, 06_final_evaluation.md, part1_documentation.md consolidated, updated 02_design_decisions_n_key_llm_interactions.md with Interactions 6-10 (gateway hardening, ML-KEM, cloud+DB+analytics, forwarding+fallback+health, Docker+CI), updated README with 3-tier instructions, updated .gitignore for *.db, *.bin
 - [x] Step 4 Part1 final polish — DONE: 06_final_evaluation.md v2 removed redundancy (LLM eval duplicated from 02_, Risks remain list duplicating R1-R7, Conclusion repeating Strengths/Weaknesses), new structure Overview with E2E evidence, Strengths with evidence, Weaknesses & Tech Debt combined table with why it matters, Risks R1-R7 consolidated status, What If Not Fully Integrated per course Q&A, Conclusion concise; explained Dockerfile implicit convention (docker-compose build: . == build {context: ., dockerfile: Dockerfile} implicit, docker build . == docker build -f Dockerfile .); runtime table pyproject.toml+uv.lock+.python-version used local+CI+Docker, Dockerfile local+CI, compose local only, ci.yml GitHub only; pytest 33/33 still pass, artifacts cleaned
-- [ ] Step 4 Part2 report — next: part2_report.md perspective 3, C-suite/manager audience, non-CS friendly, with public citations
+- [x] Step 4 Part1 final polish v2 — DONE: part1_documentation.md now 1094+ lines self-contained full details from 01-06 (reviewed up to 5.3 ok, 5.4 fixed to use R1-R7 from 06_ authoritative table Mitigated vs Remaining), README updated to hybrid title + team roles Kaiquan Mah | Quoc Nguyen | Danish Sharjeel | Manh Nguyen | Kim Nguyen, no date/branches per review, 33/33 still pass, pushed to arena  b381f07
+- [ ] Step 4 Part2 report — next: part2_report.md perspective 3, C-suite/manager audience, non-CS friendly, with public citations (research plan drafted below)
 
 ## 0. PRE-CHECK: Test Current Build BEFORE Any Edits (CRITICAL)
 
@@ -190,27 +191,27 @@ Wire Link2: `ct(768) + nonce(12) + aes_ciphertext+tag`, hybrid AES-256-GCM with 
 - [x] Added inline comments to `pqc_utils.py`, `edge_gateway.py`, `cloud_service.py` explaining improvements, where files come from, env var overrides for Docker, fallback logic, logging file-only to keep tests clean, metrics thread-safety, PQC observability
 
 ### Step 4 (90min) — Docs consolidation + Part1 final + Report draft
-- [ ] Create `documentation/part1_documentation.md` (single entry for peer review, inspired by reference example flow but NOT authoritative):
-  1. Overview & Requirements mapping
-  2. Architecture (2-tier baseline + 3-tier final)
-  3. Component Details (legacy, gateway, cloud, pqc_utils, DB schema)
-  4. How to Run (local 3 terminals + docker-compose)
-  5. Baseline Analysis summary
-  6. Design Decisions & LLM Interactions
-  7. ML-KEM Integration
-  8. Migration & Fallback Strategy
-  9. Operations (CI/CD, deployment, logging, metrics, health, PQC observability, DB analytics)
-  10. Testing & Evaluation (33/33)
-  11. Final Evaluation (strengths, weaknesses, tech debt, risks R1-R5)
-  12. References (public sources)
-  13. Appendix: LLM prompts full log
-- [ ] Update `02_design_decisions_n_key_llm_interactions.md`: add Interactions 6-10 (gateway hardening, ML-KEM, cloud+DB+analytics, Docker+CI, monitoring)
-- [ ] New `03_mlkem_integration.md`
-- [ ] New `04_migration_fallback_strategy.md`
-- [ ] New `05_operations.md`
-- [ ] New `06_final_evaluation.md`
-- [ ] Update README
-- [ ] Draft `report_perspective3_draft.md` (max 5 pages, C-suite friendly)
+- [x] Create `documentation/part1_documentation.md` (single entry for peer review, inspired by reference example flow but NOT authoritative): DONE 1094 lines, now reviewed version without date/branches, includes full details from 01-06 so reviewers can read ONLY this file, 5.4 fixed to R1-R7 authoritative from 06_
+  1. Overview & Requirements mapping — DONE
+  2. Architecture (2-tier baseline + 3-tier final) — DONE with threading model 2 threads total clarification
+  3. Component Details (legacy, gateway, cloud, pqc_utils, DB schema) — DONE 59/388/258/400 lines
+  4. How to Run (local 3 terminals + docker-compose) — DONE
+  5. Baseline Analysis summary — DONE 27→33, measurements 95B/123B/28B overhead
+  6. Design Decisions & LLM Interactions — DONE 10 + 3 fixes with prompts
+  7. ML-KEM Integration — DONE dual-wheel fix
+  8. Migration & Fallback Strategy — DONE Phase0/1/2 + fallback table
+  9. Operations (CI/CD, deployment, logging, metrics, health, PQC observability, DB analytics) — DONE
+  10. Testing & Evaluation (33/33) — DONE
+  11. Final Evaluation (strengths, weaknesses, tech debt, risks R1-R7) — DONE v3 with why it matters
+  12. References (public sources) — DONE using 5 refs from part1
+  13. Appendix: LLM prompts full log — DONE
+- [x] Update `02_design_decisions_n_key_llm_interactions.md`: add Interactions 6-10 (gateway hardening, ML-KEM, cloud+DB+analytics, Docker+CI, monitoring) — DONE 237 lines, 10+3 fixes
+- [x] New `03_mlkem_integration.md` — DONE 112 lines
+- [x] New `04_migration_fallback_strategy.md` — DONE 78 lines
+- [x] New `05_operations.md` — DONE 142 lines
+- [x] New `06_final_evaluation.md` — DONE 79 lines v3 with acronyms, strengths with evidence, weaknesses & tech debt combined table, R1-R7, what-if
+- [x] Update README — DONE hybrid title + team roles Kaiquan Mah | Quoc Nguyen | Danish Sharjeel | Manh Nguyen | Kim Nguyen, 126 lines
+- [ ] Draft `report_perspective3_draft.md` (max 5 pages, C-suite friendly) — NEXT, research plan below
 
 ### What to SKIP to stay in 4h
 - No per-device subkeys (global PSK, doc as debt)
@@ -220,36 +221,63 @@ Wire Link2: `ct(768) + nonce(12) + aes_ciphertext+tag`, hybrid AES-256-GCM with 
 - No Prometheus/Grafana (JSON health)
 - No frontend
 
-## 6. Part2 Report — Perspective 3 Research Plan (C-suite, non-CS)
+## 6. Part2 Report — Perspective 3 Research Plan (C-suite, non-CS) — UPDATED with Part1 refs only
 
-**Perspective**: Information security and organizational cybersecurity
-**Audience**: C-suite, managers, non-CS — avoid heavy math, focus on business risk, cost, timeline, fallback
+**Perspective (chosen):** Information security and organizational cybersecurity (Perspective 3)
+**Audience:** C-suite, managers, non-CS background — must be concise, max 5 pages, easy to understand yet want to act on PQC. Avoid heavy math, use analogies, focus on business risk, cost, timeline, fallback, compliance.
 
-**Writing style:**
-- Analogies: "harvest now decrypt later = stealing locked safe to open later"
-- Explain ML-KEM as "NIST-approved lock quantum computers can't pick"
-- Focus: risk, why act now, migration cost, keeping legacy running, fallback
-- Tables, phased roadmap, business continuity
+**Do we need high-level info from codebase? YES — required for credibility and to show hybrid pattern is not theory but implemented.**
 
-**Public sources:**
-- [1] https://www.encryptionconsulting.com/education-center/ml-kem-fips-203/
-- [2] https://www.cisa.gov/topics/risk-management/quantum
-- [3] https://www.aha.org/fbi-tlp-alert/2023-08-23-quantum-readiness-migration-post-quantum-cryptography
-- [4] https://www.helpnetsecurity.com/2025/07/10/david-warburton-f5-labs-eu-pqc-roadmap/
-- [5] https://vucense.com/privacy-sovereignty/post-quantum-cryptography/ml-kem-fips-203-implementation-guide-2026/
-- [6] https://eureka.patsnap.com/report-how-to-adapt-post-quantum-standards-to-existing-legacy-systems
-- [7] https://thequantuminsider.com/2026/05/12/cryptographic-inventory-challenges-post-quantum-transitions/
-- [8] https://www.digicert.com/content/dam/digicert/pdfs/guide/ultimate-guide-to-pqc.pdf
+Our codebase high-level that maps directly to industry guidance (use as concrete example in Part2):
+- **Link1 legacy (sensor→gateway):** AES-128-GCM PSK 16B `legacy_secret_16`, TCP 5000, EOF framing, plaintext ~95B JSON, wire ~123B, overhead 28B (12B nonce+16B tag), 0B HTTP overhead. Device profile ATmega328P 2KB SRAM / 32KB Flash, ML-KEM-512 sk 1632B + workspace 1000-1500B = ~3KB >2KB → stack overflow → PQC must be offloaded. This is exactly legacy constraint cited in [4][5].
+- **Link2 PQC (gateway→cloud):** ML-KEM-512 hybrid `ct(768)||nonce(12)||aes_ct` ~845B total, ss 32B as AES-256-GCM key, file-based pk distribution `cloud_public_key.bin` 800B via volume `pqc-shared`, fallback to `gateway_fallback.log` `<timestamp> <json>` if pk missing or cloud down, metrics `fallback_local`, `cloud_fail`. This is hybrid offload pattern recommended by CISA/EU [3][2].
+- **Cloud DB + observability:** SQLite `telemetry.db` 1 table, analytics `COUNT, AVG(temp/humidity), last 10, decaps_ok/fail, success_rate, avg_decaps_ms` via health 6001 JSON, gateway health 5001 `received/rejected/replayed/forwarded/fallback`. Managers can see PQC vs fallback rate — business continuity metric.
+- **Ops:** CI `setup-uv` reads `.python-version` + `uv.lock`, `uv sync --frozen`, pytest 33/33 (was 27/33 baseline), Docker `python:3.13-slim` + `uv sync --frozen`, compose with `depends_on healthy`. Shows operational suitability (perf/security + fit for ops needs).
 
-**Report structure (5 pages max):**
-1. Exec Summary: quantum threat = business risk
-2. Why legacy matters: 2KB RAM can't do PQC (needs 3KB), offload to gateway
-3. Org migration roadmap (CISA 5 priorities)
-4. Our phased strategy: Phase0 PSK, Phase1 hybrid offload, Phase2 future devices, fallback
-5. Key mgmt & supply chain: PSK in Flash vs ML-KEM pk file, vendor cooperation 60-80%
-6. LLM as untrusted: risk of AI code (static nonce), caught via tests
-7. Observability & analytics: DB + health + PQC metrics for managers
-8. Risks & compliance, conclusion with cost/timeline 10-20y
+**References to reuse from Part1 (5 only, already cited, public):**
+- [1] NIST FIPS 203 ML-KEM standardised Aug 2024 - https://www.encryptionconsulting.com/education-center/ml-kem-fips-203/ → use for: what is ML-KEM, why NIST approved, 3 param sets, why we chose 512 (Category 1 ~AES-128)
+- [2] ML-KEM sizes: 800B pk, 768B ct - https://vucense.com/privacy-sovereignty/post-quantum-cryptography/ml-kem-fips-203-implementation-guide-2026/ → use for: wire overhead numbers, hybrid KEM+AES pattern, sizes matter for constrained radio
+- [3] EU roadmap, hybrid for legacy, hardware replacement may be needed - https://www.helpnetsecurity.com/2025/07/10/david-warburton-f5-labs-eu-pqc-roadmap/ → use for: EU hybrid-PQC ciphers/certs, keep legacy running, timeline 10-20y, org must inventory
+- [4] legacy constraints, computational overhead - https://eureka.patsnap.com/report-how-to-adapt-post-quantum-standards-to-existing-legacy-systems → use for: why low-cost IoT cannot do PQC, SRAM/CPU limits, offload pattern, cost of hardware replacement
+- [5] CISA PQC initiative, phased migration - https://www.cisa.gov/topics/risk-management/quantum → use for: harvest-now-decrypt-later risk, CISA 5 priorities (inventory, risk assessment, roadmap, hybrid, supply chain), business continuity, fallback, call to action for executives
+
+**Writing style for non-CS executives:**
+- Analogies: "harvest now decrypt later = stealing locked safe to open later with quantum key", "ML-KEM = NIST-approved lock quantum computers can't pick", "gateway offload = translator that speaks old lock (AES) on one side and new quantum-safe lock on other"
+- Explain ML-KEM as KEM not encryption: agree on 32B random secret, then use AES to encrypt actual data (hybrid) — like exchanging safe combination via quantum-safe courier, then locking data with that combination
+- Focus: risk $$, why act now (data with long secrecy lifetime at risk today), migration cost (hardware replacement 10-20y), keeping legacy running (no downtime), fallback (business continuity)
+- Use tables, phased roadmap diagram, business continuity table
+
+**Step-by-step research plan (think step by step):**
+1. **Re-read 5 refs, extract 2-3 key facts each with citation:** 
+   - [1] NIST finalized FIPS 203 Aug 2024, ML-KEM based on CRYSTALS-Kyber Module-LWE, 3 param sets 512/768/1024, Category 1/3/5
+   - [2] Sizes 800B pk, 768B ct, 32B ss, hybrid pattern ct||nonce||aes_ct, performance 0.03ms encaps, why 512 lightest
+   - [3] EU recommends hybrid-PQC for legacy, inventory all systems performing crypto, hardware replacement may be needed for low-cost IoT, timeline 10-20y, vendor cooperation 60-80% (from memory of EU article)
+   - [4] Legacy constraints: 2KB SRAM cannot hold 1632B sk + 1-1.5KB workspace = 3KB >2KB, computational overhead, offload to gateway/Raspberry Pi, cost of replacement
+   - [5] CISA: harvest-now-decrypt-later, risk for data with long secrecy, 5 priorities (inventory, assess, roadmap, hybrid migration, supply chain), fallback ensures availability, business continuity, compliance (CISA product categories list Jan 2026 prioritizing PQC-capable products)
+2. **Map each ref to our codebase concrete numbers:**
+   - [1]+[2] → our Link2 800B pk, 768B ct, 845B total, encaps 0.03ms Rust / 0.82ms pure Python, decaps 0.04ms / 1.46ms, dual-wheel fix
+   - [3]+[4] → our Link1 2KB SRAM constraint, 28B overhead, PSK global (tech debt), offload pattern Phase1, Phase0/1/2 roadmap
+   - [5] → our fallback `gateway_fallback.log` + `fallback_local` metric, health endpoints 5001/6001, DB analytics `success_rate`, business continuity per CISA
+3. **Draft outline for 5-page report (concise, executive-friendly, must include citations):**
+   - Page1 Exec Summary: quantum threat = business risk, harvest now decrypt later, why act now even if quantum 10y away, our hybrid system as example (1 paragraph)
+   - Page2 Why legacy matters: ATmega328P 2KB vs 3KB needed, cannot do PQC, real-world IoT same [4], offload to gateway pattern [3][4], our Link1 numbers 95B/123B/28B
+   - Page3 Org migration roadmap: CISA 5 priorities [5], EU hybrid guidance [3], inventory challenge, phased timeline 10-20y [3][5], cost of hardware replacement
+   - Page4 Our phased strategy as concrete org example: Phase0 PSK only (baseline 27/33), Phase1 hybrid offload (current 33/33, Link1 AES unchanged, Link2 ML-KEM-512 hybrid 845B, file-based pk 800B, fallback log, DB analytics), Phase2 future PQC-capable ESP32 >8KB SRAM, supply chain vendor cooperation, key mgmt PSK in Flash vs ML-KEM pk file no auth (MITM risk R6)
+   - Page5 Risks & observability & LLM trust & conclusion: risks R1-R7 with Mitigated/Remaining (R1 DoS fixed, R2 replay partially, R3 PSK, R6 pk MITM, R7 DB backup), observability for managers (health 5001/6001, `success_rate`, `fallback_local`, AVG temp), LLM as untrusted assistant (10 interactions + 3 fixes, rejected static nonce, `MLKEM512.keygen()`, Flask, requirements.txt), compliance (CISA product categories list), cost/timeline, call to action: start inventory now, adopt hybrid with fallback, measure PQC success rate
+4. **Add citations properly:** Use [1]-[5] inline, list References section with URLs (public), ensure no invented facts, keep analogies but cite numbers from refs
+5. **Review for non-CS readability:** Replace acronyms with plain English first time, keep tables simple, max 5 pages, avoid code blocks (only high-level numbers like 800B, 768B, 845B, 28B overhead, 2KB SRAM, 33/33 tests)
+6. **Link to Part1:** Mention part1_documentation.md is self-contained with full technical details, Part2 focuses on business risk perspective
+
+**Checklist for Part2 draft:**
+- [ ] Uses only 5 refs from Part1 (no new refs needed, but can reuse same 5)
+- [ ] Includes high-level codebase info: hybrid AES (sensor→gateway) + PQC (gateway→cloud) with numbers
+- [ ] Perspective 3 InfoSec/org cybersecurity, C-suite audience, non-CS analogies
+- [ ] Max 5 pages, concise, tables, phased roadmap, fallback business continuity
+- [ ] Citations [1]-[5] present, public sources
+- [ ] Mentions LLM trust (10 interactions, rejected insecure suggestions)
+- [ ] Mentions observability (DB analytics, health, PQC metrics) for managers
+- [ ] Mentions risks R1-R7 Mitigated/Remaining and compliance
+- [ ] No date/branches header (like Part1 reviewed version)
 
 ## 7. LLM Prompt Log Template
 
@@ -265,9 +293,10 @@ Need: baseline (done), test plan (done), gateway hardening (done, needs doc), ML
 
 Order:
 1. [x] Pre-check + fix gateway -> 33/33
-2. [ ] Step 2a-2e PQC + Cloud + DB + Analytics (now broken down)
-3. [ ] Step 3 Docker + CI + health/logging
-4. [ ] Step 4 Docs + consolidated part1 doc + report draft
+2. [x] Step 2a-2e PQC + Cloud + DB + Analytics (now broken down) — DONE: pqc_utils 258 lines dual-wheel, cloud_service 400 lines SQLite+analytics+health 6001, gateway forwarding + fallback + health 5001, E2E 2 msgs → DB 2 rows avg_temp 21.8 success_rate 1.0, fallback log entry
+3. [x] Step 3 Docker + CI + health/logging — DONE: Dockerfile python:3.13-slim uv sync --frozen respects pyproject.toml+uv.lock+.python-version, compose with pqc-shared volume, CI setup-uv + PYTHONPATH + pytest 33/33 + pqc round-trip + docker-build, logging file-only
+4. [x] Step 4 Docs + consolidated part1 doc — DONE: 01-06 + part1_documentation.md 1094+ lines self-contained, README hybrid title, 5.4 fixed R1-R7, no date/branches, pushed to arena b381f07
+5. [ ] Step 4 Part2 report draft perspective 3 — NEXT: research plan drafted above using 5 refs from Part1, will include high-level hybrid codebase info (Link1 AES 16B PSK 28B overhead 2KB SRAM constraint, Link2 ML-KEM-512 hybrid 800B pk 768B ct 845B total, fallback log, DB analytics), C-suite non-CS analogies, max 5 pages
 
-Will NOT commit 02a/b/c.txt or reference PDFs.
+Will NOT commit 02a/b/c.txt or reference PDFs. **NEVER COMMIT THIS FILE TO MAIN BRANCH** — keep only in arena branch, as per user instruction.
 
