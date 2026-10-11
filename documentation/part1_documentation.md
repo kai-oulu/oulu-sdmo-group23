@@ -1,66 +1,59 @@
-# Part 1 Technical Documentation — Oulu SDMO Group 23 — Hybrid Traditional & PQC Sensor-Edge-Cloud System
+# Part 1 Technical Documentation - Oulu SDMO Group 23
+* **Members:** Kaiquan Mah | Quoc Nguyen | Danish Sharjeel | Manh Nguyen | Kim Nguyen  
+* **Python:** 3.13, package manager `uv`, deps `cryptography>=50.0.1`, `mlkem>=0.0.3`  
+* **Tests:** 33 passed (was 27/33 baseline)
+* This part 1 documentation consolidates our other documentations in the `documentation` folder which were focusing on separate parts of the system (01-06) + README + codebase. **So in this part 1 documentation, we cover the system requirements, architecture, design decisions, implementation, testing, operations, final evaluation of technical debt, references.**
 
-**Members (by contribution):** Kaiquan Mah | Quoc Nguyen | Danish Sharjeel | Manh Nguyen | Kim Nguyen  
-**Branches:** `arena/04f59b2c-oulu-sdmo-group23` (dev, this consolidated doc) + `main` (CI green 33/33)  
-**Date:** 2026-10-11, **Python:** 3.13, **Package manager:** `uv`, **Deps:** `cryptography>=50.0.1`, `mlkem>=0.0.3`  
-**Purpose:** This file consolidates `01-06` + README + codebase so reviewers can read ONLY this file; if they wish, they refer to sub-docs `01_`-`06_` for separate focus.
-
-> **Inspiration from grp28 example (non-authoritative, PDF not committed):** grp28 had cover + TOC + requirements traceability + architecture diagrams (2-tier → 3-tier) + design decisions with full LLM prompts + implementation snippets + testing evidence (unit/integration/E2E) + operations (CI/CD, Docker, monitoring) + final evaluation (strengths/weaknesses/tech debt/risks) + references + appendix. We follow similar flow but keep it minimal for 4h scope, per course Q&A: keep it plain and simple. We do NOT commit grp28 PDFs.
 
 ---
 
 ## Table of Contents
 
 0. Acronyms  
-1. Executive Summary & E2E Evidence  
-2. Requirements Mapping  
-3. Baseline Analysis (full from 01_)  
-4. Architecture (2-tier → 3-tier, threading model)  
-5. Design Decisions & LLM Interactions (full from 02_, 10 + 3 fixes)  
-6. ML-KEM Integration (full from 03_, dual-wheel fix)  
-7. Migration & Fallback Strategy (full from 04_)  
-8. Operations (full from 05_, CI/CD, Docker, logging, metrics, DB analytics, PQC observability)  
-9. Testing & Evaluation (33/33, E2E, fallback, PQC round-trip, tamper)  
-10. Final Evaluation (full from 06_ v3)  
-11. References (public)  
-12. Appendix: Files, How to Run, LLM Prompts
+1. Summary
+2. Requirements Mapping
+3. Baseline Analysis (full from [01_](01_baseline_analysis.md)) 
+4. Architecture (2-tier → 3-tier)  
+5. Design Decisions & LLM Interactions (full from [02_](02_design_decisions_n_key_llm_interactions.md), 10 interactions + 3 fixes)
+6. ML-KEM Integration (full from [03_](03_mlkem_integration.md))
+7. Migration & Fallback Strategy (full from [04_](04_migration_fallback_strategy.md))
+8. Operations (full from [05_](05_operations.md), CI/CD, Docker, logging, metrics, DB analytics, PQC observability)  
+9. Testing & Evaluation (33/33 tests)  
+10. Final Evaluation (full from [06_](06_final_evaluation.md) strengths, weaknesses & tech debt, risks R1-R7)
+11. References  
+12. Appendix: Files, How to Run Tests, LLM Prompts
 
 ---
 
-## 0. Acronyms (explicit, for non-CS readers)
+## 0. Acronyms
 
 - **PQC = Post-Quantum Cryptography**: crypto resistant to quantum computers
-- **ML-KEM = Module-Lattice-based Key Encapsulation Mechanism** (NIST FIPS 203, CRYSTALS-Kyber): PQC KEM
-- **KEM = Key Encapsulation Mechanism**: method where one side encrypts random secret with public key, other side decrypts
-- **PSK = Pre-Shared Key**: same 16B key flashed into all devices at factory, used for AES
+- **ML-KEM = Module-Lattice-based Key Encapsulation Mechanism** (NIST FIPS 203): PQC KEM
+- **KEM = Key Encapsulation Mechanism**: one side encrypts random secret with public key, other decrypts
+- **PSK = Pre-Shared Key**: same 16B key flashed into all devices at factory
 - **AES-GCM = Advanced Encryption Standard - Galois/Counter Mode**: symmetric AEAD (confidentiality + 16B tag for integrity)
-- **pk = public key** (ML-KEM encapsulation key 800B), **sk/dk = secret/decapsulation key** 1632B private, **ct = ciphertext** 768B encapsulated secret, **ss = shared secret** 32B random that becomes AES key, **B=Bytes**, **KB=Kilobytes**
-- **TTL = Time To Live**: how long we keep an entry before deleting it
-- **OOM = Out Of Memory**: program uses too much RAM and crashes
-- **LRU = Least Recently Used**: cache eviction policy — remove oldest unused entries first
-- **MITM = Man-In-The-Middle**: attacker sits between two parties, can read/modify traffic
-- **DoS = Denial of Service**: attacker makes service unavailable by crashing or overloading it
-- **TLS = Transport Layer Security**: HTTPS-like protocol that gives authentication + encryption
-- **HSM = Hardware Security Module**, **KMS = Key Management System**: hardware/software to store private keys safely
-- **DB = Database**, **ORM = Object-Relational Mapper** (we avoided ORM, used raw sqlite3)
-- **E2E = End-to-End**, **EOF = End-Of-File** (close TCP to signal end of message), **MTU = Maximum Transmission Unit**: max packet size radio can send
+- **pk = public key** (ML-KEM encaps key 800B), **sk/dk = secret/decaps key** 1632B private, **ct = ciphertext** 768B, **ss = shared secret** 32B (becomes AES-256 key), **B=Bytes**
+- **TTL = Time To Live**, **OOM = Out Of Memory**, **LRU = Least Recently Used**
+- **MITM = Man-In-The-Middle**, **DoS = Denial of Service**, **TLS = Transport Layer Security**
+- **HSM = Hardware Security Module**, **KMS = Key Management System**, **DB = Database**, **ORM = Object-Relational Mapper** (we avoided)
+- **E2E = End-to-End**, **EOF = End-Of-File** (close TCP to signal end), **MTU = Maximum Transmission Unit**
 - **CI/CD = Continuous Integration/Continuous Deployment**, **SRAM = Static RAM**
 
 ---
 
-## 1. Executive Summary & E2E Evidence
+## 1. Summary
 
-**Goal:** Modernize small legacy edge-cloud system (simulated ATmega328P sensor → edge gateway → cloud) for PQC, using LLM as untrusted assistant, with critical evaluation, per 4h peer-review scope.
+**Goal:** Modernize small legacy edge-cloud system (simulated ATmega328P sensor → edge gateway → cloud) for PQC, using LLM as an untrusted assistant, with humans evaluating LLM responses and choosing which to use or modify.
 
-**What we built (minimal but functional, from 01_ + 03_ + 04_ + 05_):**
+**What we built:**
 - 2-tier baseline (legacy → gateway, 27/33 tests) → 3-tier (legacy → gateway → cloud) with ML-KEM-512 hybrid on Link2, 33/33 tests
-- Gateway hardened: `try/except InvalidTag, ValueError, UnicodeDecodeError, JSONDecodeError`, schema validation `REQUIRED_FIELDS = {device_id, timestamp, temperature, humidity, status}`, replay cache `seen_nonces=set()` stores 12B random nonces
-- Cloud: SQLite `telemetry.db` (stdlib, 1 table, no ORM) with table `telemetry(id, device_id, timestamp, temperature, humidity, status, received_at, source_ip, pqc_decaps_ms, raw_json)`, analytics `COUNT, AVG(temp/humidity), last 10, decaps_ok/fail, avg_decaps_ms, success_rate` via health 6001 JSON
-- Gateway health 5001 metrics: `received, rejected, replayed, invalid_json, invalid_schema, empty, forwarded_to_cloud, fallback_local, cloud_fail, replay_cache_size, uptime_s`
-- Fallback: if `cloud_public_key.bin` (800B) missing or cloud unreachable (TCP 6000 refused/timeout), gateway appends `<timestamp> <json>` to `gateway_fallback.log` + `fallback_local++` (business continuity, per CISA hybrid guidance)
+- Gateway hardened: `try/except InvalidTag, ValueError, UnicodeDecodeError, JSONDecodeError`, schema validation `REQUIRED_FIELDS`, replay cache `seen_nonces=set()`
+- Cloud: SQLite `telemetry.db` (stdlib, 1 table, no ORM) + analytics `COUNT, AVG(temp/humidity), last 10, decaps_ok/fail, avg_decaps_ms, success_rate` via health 6001 JSON
+- Gateway health 5001 metrics: received/rejected/replayed/invalid_json/invalid_schema/empty/forwarded_to_cloud/fallback_local/cloud_fail
+- Fallback: if `cloud_public_key.bin` missing or cloud unreachable (TCP 6000 refused/timeout), gateway appends `<timestamp> <json>` to `gateway_fallback.log` + `fallback_local++` (business continuity, per CISA hybrid guidance)
 - Operations: CI via `astral-sh/setup-uv` reading `.python-version` + `uv.lock`, `uv sync --frozen --all-groups` + `pytest -v`; Dockerfile `python:3.13-slim` + `uv sync --frozen --no-install-project`; docker-compose with named volume `pqc-shared` for pk sharing, healthchecks, `depends_on healthy`; logging to files (`gateway.log`, `cloud.log`, `pqc.log`) to keep stdout clean for tests; health via stdlib `http.server` (no Flask)
 
-**E2E evidence (last tested 2026-10-11, from 05_ + 06_):**
+**E2E Test Evidence (Last tested 2026-10-11):**
 ```bash
 # Terminal1 Cloud
 uv run python src/cloud_service.py  # generates cloud_public_key.bin 800B + telemetry.db
@@ -79,41 +72,54 @@ curl http://127.0.0.1:5001/health  # {"received":2,"forwarded_to_cloud":2,"fallb
 curl http://127.0.0.1:6001/health  # {"db_rows":2,"analytics":{"avg_temperature":21.8,"avg_humidity":55.4},"pqc":{"decaps_ok":2,"success_rate":1.0,"avg_decaps_ms":0.04}}
 sqlite3 telemetry.db "SELECT COUNT(*), AVG(temperature) FROM telemetry;"  # 2|21.8
 ```
+
 Fallback evidence: stop cloud, send legacy → `gateway_fallback.log` has entry like `1726478400 {"device_id":"sensor-node-01",...}`, health 5001 shows `fallback_local=1`, `cloud_fail=1`.
 
-**CI evidence:** `origin/main` run `38103152286` success 32s after fixes (os import + PYTHONPATH + dual-wheel), `arena` run `38102098201` success 38s, both 33/33. Docker build verified via `docker build -t edge-gateway:test .` and `docker build -t cloud-service:test .`.
+**CI evidence:** `origin/main` run `38103152286` and onwards with success 32s, `arena` run `38102098201` success 38s, both 33/33.
+
 
 ---
 
-## 2. Requirements Mapping (from rqmts1/rqmts2 checklist, full)
+## 2. Project Requirements Mapping
 
 | Requirement | Status | Evidence (file:line) |
 |-------------|--------|----------------------|
-| AI-assisted development: generate components with LLM, record prompts/outputs/decisions | ✅ Done | `02_` logs 10 major LLM interactions (1 baseline scaffolding, 2 protocol selection, 3 framing, 4 test plan, 5 test gen, 6 gateway hardening, 7 ML-KEM, 8 cloud+DB+analytics, 9 forwarding+fallback+health, 10 Docker+CI) + 3 human CI fixes (11 ModuleNotFoundError src, 12 ImportError ML_KEM dual-wheel, 13 NameError os) |
-| Baseline analysis: understand initial architecture, run system, baseline tests/measurements | ✅ Done | `01_` with 2-tier diagram, component roles, Link1 AES-128-GCM PSK 16B TCP 5000 EOF, Link2 planned ML-KEM-512, device specs ATmega328P 2KB SRAM/32KB Flash, measurements plaintext 95B wire 123B overhead 28B (12 nonce+16 tag), 0B HTTP overhead, 27/33 tests initially, gap analysis R1-R3, tamper test, overhead measurement commands |
-| Critical evaluation & maintenance: test, review, correct, improve LLM artefacts | ✅ Done | Fixed gateway crash (try/except) → 33/33, corrected `mlkem` API (`key_gen` not `generate`), fixed logging to file (was polluting stdout because tests merge stdout+stderr via `stderr=STDOUT` and `wait_for_line` got concatenated), fixed large packet test payload to include REQUIRED_FIELDS, fixed dual-wheel `mlkem` import (Rust `from mlkem import ML_KEM` vs pure Python `from mlkem.ml_kem import ML_KEM`), fixed missing `import os` in cloud_service |
-| ML-KEM integration: use existing implementation, at least one path | ✅ Done | `src/pqc_utils.py` 258 lines, `cloud_service.py` 400 lines, `edge_gateway.py` 388 lines, ML-KEM-512 hybrid `ct(768)||nonce(12)||aes_ct` ~845B, file-based pk distribution `cloud_public_key.bin` 800B, supports both Rust binding (rust.so 909KB, `__init__.py` exports ML_KEM) and pure Python (fastmath.so 80KB, empty `__init__.py`) wheels of `mlkem==0.0.3`, flag `RUST_BINDING` in metrics |
-| Preserve legacy compatibility / migration & fallback strategy | ✅ Done | `04_` phased: Phase0 PSK only, Phase1 hybrid offload (current, legacy unchanged, no firmware update for 2KB SRAM device), Phase2 future PQC-capable ESP32 with >8KB SRAM, fallback to `gateway_fallback.log` if pk missing or cloud down, store-and-forward `<timestamp> <json>`, business continuity per CISA/ENISA |
-| Operations: automate build/testing, deployment to test env, health checks, logs, metrics | ✅ Done | `05_` + `.github/workflows/ci.yml` (setup-uv reads `.python-version` 3.13 + `uv.lock`, `uv sync --frozen --all-groups`, `uv pip install pytest`, `PYTHONPATH` set to workspace, `pytest -v` 33 tests, `pqc_utils.py` round-trip, import checks for both `src.*` and top-level, verify `.python-version`/pyproject/uv.lock) + `docker-build` (needs: test, `docker build` verifies Dockerfile respects lock) + Dockerfile `python:3.13-slim`, `uv sync --frozen --no-install-project`, `HEALTHCHECK`, docker-compose with `depends_on healthy`, volume `pqc-shared`, logging file-only, metrics counters, PQC observability encaps_ms/decaps_ms, DB analytics |
-| Final evaluation: strengths/weaknesses, technical debt, risks | ✅ Done | `06_` v3 with acronym glossary, strengths with E2E evidence, weaknesses & tech debt combined table with why it matters (global PSK physical extraction, replay cache no TTL/no persistence OOM + replay after restart, file-based pk no auth MITM, no rotation no forward secrecy, no TLS no server auth, single-threaded starvation, logs no rotation DB no backup), risks R1-R7 consolidated with status Mitigated/Not mitigated + remaining, what-if-not-fully-integrated per course Q&A, conclusion concise |
-| Simple DB at cloud side (SQLite) to store telemetry | ✅ Done | `telemetry.db` 1 table `telemetry(id, device_id, timestamp, temperature, humidity, status, received_at, source_ip, pqc_decaps_ms, raw_json)`, stdlib sqlite3, `check_same_thread=False` for thread safety, `CREATE TABLE IF NOT EXISTS`, `INSERT` with `?`, gitignored `*.db`, `*.bin` |
-| Observability includes simple analytics on cloud side (avg temp, counts, PQC success rate) | ✅ Done | Cloud health 6001 returns `db_rows`, `total_received`, `analytics {total_count, avg_temperature, avg_humidity, max_timestamp, last_10}`, `pqc {decaps_ok, decaps_fail, json_fail, success_rate, avg_decaps_ms}`, `uptime_s` — managers see PQC vs fallback, avg temp, recent telemetry |
-| Consolidate all Part1 docs into 1 full part1_documentation.md | ✅ Done | This file, inspired by grp28 example structure but our content, includes full details from 01-06 so reviewers can refer only to this file |
-| Part2 perspective: InfoSec/org cybersecurity, C-suite/manager audience, public citations | ⏳ Next | Will be `part2_report.md`, non-CS friendly, business risk focus, with NIST/CISA/ENISA citations |
+| AI-assisted development: generate components with LLM, record prompts/outputs/decisions | Done | `02_` logs 10 major LLM interactions (1 architecture, 2 protocol, 3 framing, 4 test plan, 5 test case generation, 6 gateway hardening, 7 ML-KEM, 8 cloud+DB+analytics, 9 forwarding+fallback, 10 Docker+CI) |
+| Baseline analysis: understand initial architecture, run system, baseline tests/measurements | Done | `01_` with 2-tier diagram, measurements plaintext 95B, wire 123B, overhead 28B (12 nonce+16 tag), 27/33 tests initially, gap analysis |
+| Critical evaluation & maintenance: test, review, correct, improve LLM artefacts | Done | Fixed gateway crash → 33/33, corrected `mlkem` API (`key_gen` not `generate`), fixed logging to file (was polluting stdout), fixed large packet test payload, fixed dual-wheel `mlkem` import (Rust vs pure Python), fixed missing `import os` in cloud_service |
+| ML-KEM integration | Done | `src/pqc_utils.py`, `cloud_service.py`, `edge_gateway.py`, `file-based public key distribution via cloud_public_key.bin`, supports both Rust binding (rust.so 909KB) and pure Python (fastmath.so 80KB, empty __init__.py) python library wheels |
+| Preserve non-PQC legacy sensor compatibility / migration & fallback strategy | Done | `04_` Phased migration approach |
+| Operations: automate build/testing, deployment to `test`, health checks, logs, metrics | Done | `05_` + `.github/workflows/ci.yml`, `Dockerfile`, `docker-compose.yml`, sqlite DB, logging file-only (for logging if cloud service is offline), metrics, PQC observability |
+| Final evaluation: strengths/weaknesses, technical debt, risks | Done | `06_` with acronym glossary, strengths, weaknesses, technical debt, risks mitigated/remaining |
+| Simple DB at cloud side (SQLite) to store telemetry | Done | `telemetry.db` 1 table `telemetry(id, device_id, timestamp, temperature, humidity, status, received_at, source_ip, pqc_decaps_ms, raw_json)`, stdlib sqlite3, gitignored |
+| Observability includes simple analytics on cloud side (avg temp, counts, PQC success rate) | Done | Cloud health 6001 returns `db_rows`, `analytics.avg_temperature`, `avg_humidity`, `last_10`, `pqc.decaps_ok`, `decaps_fail`, `success_rate`, `avg_decaps_ms` |
 
-**Usage of AI (per rqmts2):**
-- Must use AI to create code (Part1): Yes, all src generated via LLM prompts logged in 02_ + appendix
-- Must manually evaluate AI-generated code continuously: Yes, via pytest 27→33, REPL API testing, E2E, log pollution fix, dual-wheel fix, os import fix, path handling fix
-- Must include prompts in technical documentation: Yes, in 02_ sections 1.1-1.10 + fixes 11-13 + appendix 12.3
-- Must report how/where AI used: Yes, accepted/modified/rejected matrix in 02_ and summary in Section 5
-- Must not use AI for personal reflections (Part3): Noted, will be manual
+**Usage of AI:**
+- Must use AI to create code (Part1): Yes, all code in the `src` folder was generated via LLM prompts logged in 02_
+- Must manually evaluate AI-generated code continuously: Yes, via pytest, log pollution fix, library fix (eg to cater for RUST which was introducted when we integrated with the mlkem library and GitHub actions), os import fix
+- Must include prompts in technical documentation: Yes, in `02_` section 1 + appendix below
+- Must report how/where AI used: Yes, accepted/modified/rejected matrix in `02_` section 1 + appendix below
 
-**Constraints:**
-- Keep design simple (4h limit): Done — single-threaded data plane (2 threads total: 1 data + 1 health), SQLite stdlib, http.server stdlib, no Flask, no Prometheus, no per-device keys, no TLS, file-based pk, per course Q&A: keep it plain and simple, don't make project bigger than needed
+
+
+
+
+
+
+
 
 ---
 
-## 3. Baseline Analysis (full details from 01_baseline_analysis.md)
+## 3. Baseline Analysis (Full details from 01_baseline_analysis.md)
+
+### 3.0 Summary
+
+- **Initial architecture 2-tier only:** `[Legacy ATmega328P sim] --AES-128-GCM PSK 16B, TCP 5000, EOF--> [Edge Gateway]`
+- **Measurements:** plaintext JSON ~95B, wire packet 12B nonce + 95B JSON + 16B tag = 123B, overhead 28B, 0B HTTP overhead (raw TCP+EOF)
+- **Baseline tests:** 27 passed, 6 failed documenting risks R1-R3 (gateway crash on `InvalidTag` exit 1, no schema validation, no replay protection)
+- **Device constraints:** ATmega328P 2KB SRAM / 32KB Flash, ML-KEM-512 sk 1632B + workspace 1000-1500B = ~3KB >2KB → stack overflow, so PQC must be offloaded to gateway (Linux/Pi)
+- **Planned improvements done on 2026-10-10:** try/except boundary, REQUIRED_FIELDS schema, seen_nonces replay cache, now 33/33 pass
+
 
 ### 3.1 Initial Architecture (2-tier)
 
@@ -136,7 +142,7 @@ Fallback evidence: stop cloud, send legacy → `gateway_fallback.log` has entry 
  +---------------------------+              +---------------------+
 ```
 
-After implementing 2-tier, we add cloud as 3rd tier with ML-KEM.
+After implementing 2-tier, we added cloud as 3rd tier with ML-KEM.
 
 ```
  [       Tier 1: Sensor      ]              [ Tier 2: Edge Gateway ]             [ Tier 3: Cloud Service ]
@@ -301,11 +307,22 @@ print(f'Wire Packet:     {len(enc)} bytes (Nonce: 12, Tag: 16, Overhead: 28 byte
 "
 ```
 
+
+
+
+
+
+
+
+
+
+
+
 ---
 
-## 4. Architecture (final 3-tier, full details)
+## 4. Architecture
 
-### 4.1 Final Diagram
+### 4.1 Final Architecture Diagram (3-tier, with PQC, DB, analytics)
 
 ```
 [Legacy Device] --AES-GCM PSK, TCP 5000, EOF--> [Edge Gateway: 5000 data + 5001 health]
@@ -321,7 +338,6 @@ print(f'Wire Packet:     {len(enc)} bytes (Nonce: 12, Tag: 16, Overhead: 28 byte
                                                     | INSERT INTO telemetry.db (SQLite)
                                                     | analytics: COUNT, AVG(temp/humidity), last 10, decaps_ok/fail, avg_decaps_ms, success_rate
 ```
-
 ### 4.2 Wire Formats
 
 - **Link1:** `nonce(12) || ciphertext+tag`, plaintext JSON ~95B, total ~123B, overhead 28B constant, EOF framing (close socket)
@@ -331,12 +347,12 @@ print(f'Wire Packet:     {len(enc)} bytes (Nonce: 12, Tag: 16, Overhead: 28 byte
 
 - ATmega328P 2KB SRAM cannot hold ML-KEM-512 sk 1632B + workspace 1000-1500B = ~3KB → stack overflow
 - Gateway Linux/Pi has enough RAM, measures encaps 0.03ms Rust / 0.82ms pure Python, decaps 0.04ms / 1.46ms negligible
-- Real-world IoT: many low-cost sensors cannot be upgraded to PQC without hardware replacement (per ENISA/EU roadmap)
+- Real-world IoT: many low-cost sensors cannot be upgraded to PQC without hardware replacement (from the CISA PQC phased migration guidelines)
 
-### 4.4 Threading Model (answers concurrent starvation question)
+### 4.4 Threading Model
 
-- **2 threads total:** (1) main TCP data thread `accept()` + blocking `recv()` = single-threaded data plane, processes one sensor at a time, while others wait in TCP backlog queue (starvation = they starve, not served, timeout if 100 sensors at once), (2) health HTTP thread 5001 daemon
-- No contradiction with "single-threaded gateway" — we mean data plane single-threaded for simplicity per 4h limit. Future: `asyncio` or thread pool (rejected for simplicity)
+- **2 threads total:** (1) main TCP data thread `accept()` + blocking `recv()` = single-threaded data plane, processes one sensor at a time, while others wait in the TCP backlog queue (and timeout if there are 100 sensors in the queue at once), (2) health HTTP thread 5001 daemon
+- Please note that when we talk about a "single-threaded gateway", it means that the gateway/data plane is single-threaded for the purpose of receiving/processing data from 1 sensor at a time.
 
 ### 4.5 Component Details (from 02_ + 03_ + code)
 
@@ -353,7 +369,7 @@ print(f'Wire Packet:     {len(enc)} bytes (Nonce: 12, Tag: 16, Overhead: 28 byte
 - `metrics` dict with `metrics_lock` threading.Lock: `received, rejected, replayed, invalid_json, invalid_schema, empty, forwarded_to_cloud, fallback_local, cloud_fail, uptime_start`
 - `forward_to_cloud(json_str)`: tries `load_public_key(CLOUD_PK_PATH)` (file-based distribution Phase1, cloud writes pk on start, shared via volume `pqc-shared` in Docker, gitignored `*.bin`), if missing → fallback log + `fallback_local++`, else `pqc_utils.encrypt_for_cloud(plaintext, ek_bytes)` → packet ct+nonce+aes_ct, TCP send to `CLOUD_HOST:6000` (env var, default 127.0.0.1 local, `cloud:6000` in Docker), EOF via `shutdown(SHUT_WR)`, if unreachable → fallback log + `cloud_fail++`, `fallback_local++`, metrics
 - `HealthHandler`: `GET /health` returns JSON metrics, `replay_cache_size=len(seen_nonces)`, `uptime_s`
-- `start_health_server()`: HTTPServer 5001 in daemon thread, logs to file only (not stdout) to keep tests clean — tests merge stdout+stderr via `stderr=STDOUT` and `wait_for_line` looks for `Received from device:`, logging to stderr would cause concatenated line `Received...2026-10-10 INFO Gateway health listening...` → test failure, fixed by file handler `gateway.log`
+- `start_health_server()`: HTTPServer 5001 in daemon thread, logs to file only (not stdout) to keep tests clean - tests merge stdout+stderr via `stderr=STDOUT` and `wait_for_line` looks for `Received from device:`, logging to stderr would cause concatenated line `Received...2026-10-10 INFO Gateway health listening...` → test failure, fixed by file handler `gateway.log`
 - `start_gateway()`: TCP server 5000 with `SO_REUSEADDR`, accept loop with try/except for `InvalidTag, ValueError, UnicodeDecodeError, JSONDecodeError`, logs warning + continue (no crash), prints `Edge Gateway listening...` (expected by tests) and `Received from device: {raw_data}` (expected by tests)
 
 **pqc_utils.py (258 lines, dual-wheel support, full from 03_ + fixes):**
@@ -392,12 +408,19 @@ telemetry(
   raw_json TEXT
 )
 ```
-- No ORM, raw sqlite3, file `telemetry.db` gitignored, created at runtime
+- raw sqlite file `telemetry.db` gitignored, created at runtime
 - Analytics queries: `COUNT, AVG, last 10`
+
+
+
+
+
+
+
 
 ---
 
-## 5. Design Decisions & LLM Interactions (full details from 02_)
+## 5. Design Decisions & LLM Interactions (full details from 02_design_decisions_n_key_llm_interactions.md)
 
 ### 5.1 Significant Input Prompts and LLM Interactions (10 + 3 fixes)
 
@@ -436,12 +459,12 @@ telemetry(
 **Interaction 6: Gateway Hardening (Fixing 6 Failing Tests)**
 - **Prompt:** "My edge_gateway.py crashes when it receives malformed AES-GCM packets (InvalidTag) and it accepts any JSON without validating required fields device_id, timestamp, temperature, humidity, status, and it doesn't check for replayed nonces. How should I harden it to pass these tests: test_gateway_remains_available_after_malformed_nonempty_packet, test_gateway_remains_available_after_connection_closes_mid_packet, test_gateway_remains_available_after_two_packets_share_one_connection, test_gateway_rejects_authenticated_non_json_payload_and_processes_valid_packet, test_gateway_rejects_wrong_telemetry_schema_and_processes_valid_packet, test_gateway_rejects_replayed_packet_and_processes_new_valid_packet? Keep it simple, single-threaded, with logging and metrics."
 - **LLM Output:** Suggested wrapping decrypt in try/except InvalidTag, ValueError, UnicodeDecodeError, JSONDecodeError, logging warning and continuing, REQUIRED_FIELDS set and `issubset` check, `seen_nonces=set()` for replay, check `if nonce in seen_nonces: reject`, add after successful validation, metrics dict and logging to file
-- **Human Decision:** Accepted try/except boundary, REQUIRED_FIELDS validation, seen_nonces set, metrics counters, logging to file. Modified: LLM suggested logging to stderr — changed to file handler `gateway.log` because tests use `stderr=STDOUT` merged pipe, logging to stderr polluted `wait_for_line` (caused "Received ...Gateway health listening" concatenated line). Modified large packet test payload to include REQUIRED_FIELDS + samples to still test buffer accumulation. Verification: `pytest -v` → 33 passed, 0 failed, manual E2E with 2 sends works
+- **Human Decision:** Accepted try/except boundary, REQUIRED_FIELDS validation, seen_nonces set, metrics counters, logging to file. Modified: LLM suggested logging to stderr - changed to file handler `gateway.log` because tests use `stderr=STDOUT` merged pipe, logging to stderr polluted `wait_for_line` (caused "Received ...Gateway health listening" concatenated line). Modified large packet test payload to include REQUIRED_FIELDS + samples to still test buffer accumulation. Verification: `pytest -v` → 33 passed, 0 failed, manual E2E with 2 sends works
 
 **Interaction 7: ML-KEM Integration (PQC Library and Hybrid Design)**
 - **Prompt:** "I need to integrate ML-KEM-512 into my edge-cloud system. I have mlkem==0.0.3 library. Show how to generate keypair, encapsulate, decapsulate, and build hybrid encryption where ML-KEM shared secret (32B) is used as AES-256-GCM key to encrypt telemetry JSON. Wire format should be ct(768)||nonce(12)||aes_ct. Keep it simple, file-based public key distribution."
 - **LLM Output:** Initially suggested `MLKEM512.keygen()` and `ek.encaps()` which do not exist in `mlkem==0.0.3`, suggested hybrid pattern KEM+AES-GCM correct, file-based pk distribution
-- **Human Decision:** Rejected `MLKEM512.keygen()` — tested via `python -c "import mlkem; help(mlkem)"` and REPL, found correct API is `ML_KEM(ParameterSet.ML_KEM_512).key_gen() -> ek, dk` and `encaps(ek) -> ss, ct` and `decaps(dk, ct) -> ss`. Accepted hybrid pattern, file-based distribution, wire format, constants PK_LEN=800, CT_LEN=768, SS_LEN=32. Modified: added timing metrics encaps_ms, decaps_ms for PQC observability, logging. Verification: round-trip via `python src/pqc_utils.py` → packet 845B, encaps 0.03ms, decaps 0.04ms, decrypt matches original
+- **Human Decision:** Rejected `MLKEM512.keygen()` - tested via `python -c "import mlkem; help(mlkem)"` and REPL, found correct API is `ML_KEM(ParameterSet.ML_KEM_512).key_gen() -> ek, dk` and `encaps(ek) -> ss, ct` and `decaps(dk, ct) -> ss`. Accepted hybrid pattern, file-based distribution, wire format, constants PK_LEN=800, CT_LEN=768, SS_LEN=32. Modified: added timing metrics encaps_ms, decaps_ms for PQC observability, logging. Verification: round-trip via `python src/pqc_utils.py` → packet 845B, encaps 0.03ms, decaps 0.04ms, decrypt matches original
 
 **Interaction 8: Cloud Service + SQLite DB + Analytics**
 - **Prompt:** "Create a cloud_service.py that listens on TCP 6000 for PQC packets (ct 768 + nonce 12 + aes_ct), decapsulates using ML-KEM-512 private key, AES-GCM decrypts, stores in SQLite telemetry.db with table telemetry(id, device_id, timestamp, temperature, humidity, status, received_at, source_ip, pqc_decaps_ms, raw_json), and has health/analytics endpoint on 6001 returning JSON with db_rows, avg temp/humidity, last 10, decaps_ok/fail, success_rate, avg_decaps_ms. Keep it simple, stdlib only, no Flask."
@@ -455,14 +478,17 @@ telemetry(
 
 **Interaction 10: Docker + CI/CD + pyproject.toml/uv.lock/.python-version**
 - **Prompt:** "Generate GitHub Actions CI and Dockerfile and docker-compose for Python project using uv package manager, with pyproject.toml, uv.lock, .python-version 3.13. CI should run pytest -v, test PQC utils, check imports. Dockerfile should be python:3.13-slim, respect locked versions via uv sync --frozen, and have HEALTHCHECK. docker-compose should have cloud and gateway services with healthchecks and volume sharing for public key. Keep it simple."
-- **LLM Output:** Initially suggested `pip install -r requirements.txt` — rejected, project uses pyproject.toml + uv, not requirements.txt. Suggested Flask for health — rejected, we use stdlib http.server. Suggested `astral-sh/setup-uv` action, `uv sync --frozen`, Dockerfile with `pip install uv && uv sync --frozen --no-install-project`, `ENV PATH .venv/bin`
+- **LLM Output:** Initially suggested `pip install -r requirements.txt` - rejected, project uses pyproject.toml + uv, not requirements.txt. Suggested Flask for health - rejected, we use stdlib http.server. Suggested `astral-sh/setup-uv` action, `uv sync --frozen`, Dockerfile with `pip install uv && uv sync --frozen --no-install-project`, `ENV PATH .venv/bin`
 - **Human Decision:** Rejected requirements.txt, Flask. Accepted `astral-sh/setup-uv@v4` with cache, `uv python install`, `uv sync --frozen`, `uv pip install pytest`, `uv run pytest -v`, Dockerfile with `COPY pyproject.toml uv.lock .python-version README.md`, `uv sync --frozen --no-install-project`, `ENV PATH .venv/bin`, HEALTHCHECK via socket, docker-compose with `depends_on healthy` and bind mounts. Modified: added `[dependency-groups] dev = ["pytest>=8.0"]` to pyproject.toml. Verification: `pytest -v` 33 passed, Dockerfile copies correct files, CI yml contains checks for .python-version, pyproject.toml, uv.lock
 
-**Additional Fixes (CI failures, human, not LLM):**
 
-- **Fix 11: ModuleNotFoundError: No module named 'src'** — `conftest.py` only added `src/` to path, so `from src.pqc_utils import ...` fallback failed. Fixed by inserting both PROJECT_ROOT and src/ into sys.path, and only fallback when error contains `pqc_utils`, not masking dependency errors. Files: `tests/conftest.py:17-18`, `src/edge_gateway.py:22-35`, `src/cloud_service.py:20-35`
-- **Fix 12: ImportError: cannot import name 'ML_KEM' from 'mlkem'** — mlkem 0.0.3 has 2 wheels: Rust (rust.so 909KB, `__init__.py` exports ML_KEM) and pure Python (fastmath.so 80KB, empty `__init__.py`). CI Python 3.13 got pure Python. Fixed by trying Rust first, fallback to pure Python `from mlkem.ml_kem import ML_KEM` + `from mlkem.parameter_set import ML_KEM_512`, flag `RUST_BINDING`. File: `src/pqc_utils.py:16-80`, tested Rust 33 passed encaps 0.06ms, pure Python 33 passed encaps 0.82ms
-- **Fix 13: NameError: name 'os' is not defined** in `cloud_service.py` line 63 `CLOUD_HOST = os.getenv(...)` — missing `import os`. Fixed by adding `import os`. File: `src/cloud_service.py:11`, also synced `edge_gateway.py` to use env vars `CLOUD_HOST`, `CLOUD_PORT`, `FALLBACK_LOG` via `os.getenv`
+**Additional Fixes (CI failures fixed by a human):**
+
+- **Fix 11: ModuleNotFoundError: No module named 'src'** - `conftest.py` only added `src/` to path, so `from src.pqc_utils import ...` fallback failed. Fixed by inserting both PROJECT_ROOT and src/ into sys.path, and only fallback when error contains `pqc_utils`, not masking dependency errors. Files: `tests/conftest.py:17-18`, `src/edge_gateway.py:22-35`, `src/cloud_service.py:20-35`
+- **Fix 12: ImportError: cannot import name 'ML_KEM' from 'mlkem'** - mlkem 0.0.3 has 2 wheels: Rust (rust.so 909KB, `__init__.py` exports ML_KEM) and pure Python (fastmath.so 80KB, empty `__init__.py`). CI Python 3.13 got pure Python. Fixed by trying Rust first, fallback to pure Python `from mlkem.ml_kem import ML_KEM` + `from mlkem.parameter_set import ML_KEM_512`, flag `RUST_BINDING`. File: `src/pqc_utils.py:16-80`, tested Rust 33 passed encaps 0.06ms, pure Python 33 passed encaps 0.82ms
+- **Fix 13: NameError: name 'os' is not defined** in `cloud_service.py` line 63 `CLOUD_HOST = os.getenv(...)` - missing `import os`. Fixed by adding `import os`. File: `src/cloud_service.py:11`, also synced `edge_gateway.py` to use env vars `CLOUD_HOST`, `CLOUD_PORT`, `FALLBACK_LOG` via `os.getenv`
+
+
 
 ### 5.2 Design Decisions Matrix (Accepted, Modified, Rejected)
 
@@ -475,7 +501,7 @@ telemetry(
 | **Key Distribution** | Pre-Shared Key (PSK) in ROM | Dynamic Key Exchange (DH/ECDH) | **Accepted** | Embedded sensors commonly store factory-flashed PSKs in write-protected Flash ROM to avoid compute-intensive asymmetric handshakes. |
 | **Nonce Generation** | Fresh 12-byte random nonce per packet | Sequential counter, Static Nonce | **Accepted** | AES-GCM security collapses if nonces reused with same key. 96-bit random nonce ensures freshness without persistent EEPROM writes. |
 | **PQC Library** | mlkem==0.0.3 (supports both Rust and pure Python wheels) | kyber-py, liboqs, cryptography | **Accepted** | Minimal, pip-installable, works with uv + Docker, dual-wheel fix added |
-| **PQC Param** | ML-KEM-512 (800B pk, 768B ct) | 768 (1184B pk) / 1024 (1568B) | **Accepted** | Lowest overhead for gateway, 128-bit security sufficient for short-lived telemetry |
+| **PQC Params** | ML-KEM-512 (800B pk, 768B ct) | 768 (1184B pk) / 1024 (1568B) | **Accepted** | Lowest overhead for gateway, 128-bit security sufficient for short-lived telemetry |
 | **Hybrid** | KEM+AES-256-GCM | Pure PQC encrypt | **Accepted** | ML-KEM is KEM, not encryption |
 | **DB** | SQLite stdlib | JSONL, ORM, Postgres | **Accepted** | Stdlib, 1 file, enables analytics queries |
 | **Health** | stdlib http.server | Flask/FastAPI | **Accepted** | No extra dep, simple |
@@ -490,9 +516,9 @@ telemetry(
 - **Single-Client Synchronous Blocking Loop:** `edge_gateway.py` executes single-threaded synchronous loop `accept()` + blocking `recv()`. While gateway reads/decrypts from one sensor, no other sensor can connect. If one client stalls, gateway hangs for all nodes. Documented as scalability tech debt.
 - **TCP Handshake Overhead:** Using connection closure (EOF) as message boundary requires opening/closing TCP socket for each reading. Every reading requires full TCP 3-way handshake SYN→SYN-ACK→ACK and teardown FIN→ACK, introducing latency. Trade-off for simplicity.
 
-### 5.4 Remaining Project Risks and Mitigation Roadmap (consolidated R1-R7, full from 06_ — authoritative risks table, also repeated in Section 10.4)
+### 5.4 Remaining Project Risks and Mitigation Roadmap (consolidated R1-R7, full from 06_ - authoritative risks table, also repeated in Section 10.4)
 
-**Note:** 02_ originally listed R1-R5 (baseline risks). After implementing PQC (Link2), SQLite DB, and file-based pk distribution, we added R6 (pk MITM) and R7 (DB backup) in 06_ v3. Status now shows Mitigated vs Not mitigated with remaining work — this is the table reviewers should use. Same table appears in Section 10.4 Final Evaluation.
+**Note:** [02_design_decisions_n_key_llm_interactions.md](02_design_decisions_n_key_llm_interactions.md) originally listed R1-R5 (baseline risks). After implementing PQC (Link2), SQLite DB, and file-based pk distribution, we added R6 (pk MITM) and R7 (DB backup) in [06_final_evaluation.md](06_final_evaluation.md). The same table appears in Section 10.4 Final Evaluation.
 
 | # | Risk | Severity | Status | Remaining (what still needs fixing) |
 |---|------|----------|--------|--------------------------------------|
@@ -504,15 +530,31 @@ telemetry(
 | **R6** | File-based pk (public key) MITM (Man-In-The-Middle) | Medium | **Not mitigated:** pk file no auth (authentication) | Sign pk or use secure distribution (cert, TLS pinning, KMS) |
 | **R7** | DB (Database) no backup | Low | **Not mitigated:** single file `telemetry.db` | Periodic backup |
 
-Overall: High-severity R1 fixed, medium R2 partially fixed, others documented as debt. Full details also in Section 10.4 with acronyms expanded.
+Overall: High-severity R1 fixed, medium R2 partially fixed, others documented as technical debt. Full details also shown in Section 10.4.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ---
 
-## 6. ML-KEM Integration (full details from 03_mlkem_integration.md + dual-wheel fix)
+## 6. ML-KEM Integration (full details from 03_mlkem_integration.md)
 
 ### 6.1 Objective
 
-Integrate post-quantum key encapsulation (ML-KEM) into at least one communication path (Link 2) using existing library, preserving legacy compatibility for Link 1 (ATmega328P).
+Integrate post-quantum key encapsulation (ML-KEM) into at least one communication path (Link 2) using an existing library, preserving legacy compatibility for non-PQC in Link 1 (ATmega328P).
 
 ### 6.2 Library Choice
 
@@ -528,7 +570,7 @@ Integrate post-quantum key encapsulation (ML-KEM) into at least one communicatio
 - API validated via REPL: `ML_KEM(ParameterSet.ML_KEM_512).key_gen() -> ek 800B, dk 1632B`, `encaps(ek) -> ss 32B, ct 768B`, `decaps(dk, ct) -> ss`
 - Works with `uv sync --frozen` and `python:3.13-slim` Docker
 - Documented as tech debt: file-based public key distribution (simple for 4h), future should use certificate or KMS
-- **Dual-wheel fix:** Supports both Rust binding (rust.so 909KB, `__init__.py` exports ML_KEM) and pure Python (fastmath.so 80KB, empty `__init__.py`) — we handle both via `RUST_BINDING` flag, trying Rust first then pure Python fallback
+- **Dual-wheel fix:** Supports both Rust binding (rust.so 909KB, `__init__.py` exports ML_KEM) and pure Python (fastmath.so 80KB, empty `__init__.py`) - we handle both via `RUST_BINDING` flag, trying Rust first then pure Python fallback
 
 **Why ML-KEM-512 (not 768/1024):**
 
@@ -538,7 +580,7 @@ Integrate post-quantum key encapsulation (ML-KEM) into at least one communicatio
 | ML-KEM-768 | ~AES-192 (Category 3) | 1184B | 1088B | 32B | NIST recommended default |
 | ML-KEM-1024 | ~AES-256 (Category 5) | 1568B | 1568B | 32B | Highest |
 
-- ML-KEM-512 has lowest wire overhead (800+768=1568B vs 2272B for 768) — matters for gateway forwarding many sensors
+- ML-KEM-512 has lowest wire overhead (800+768=1568B vs 2272B for 768) - matters for gateway forwarding many sensors
 - Still 128-bit classical security, sufficient for telemetry with short secrecy lifetime (minutes/hours, not decades)
 - Cloud stores telemetry short-term, not long-term archival
 - Documented: if long-term confidentiality needed (e.g., medical), should use ML-KEM-768 or 1024
@@ -557,7 +599,7 @@ Total ~845B for typical telemetry {"device_id":..., "temperature":21.8,...}
 1. Cloud on start: `ek, dk = ML_KEM(ML_KEM_512).key_gen()`, save `ek` to `cloud_public_key.bin` (800B), `CLOUD_PK_PATH` env var (default `./cloud_public_key.bin`, Docker `/app/shared/cloud_public_key.bin` via volume `pqc-shared`)
 2. Gateway after validating legacy AES-GCM payload:
    - Load `cloud_public_key.bin` (if missing → fallback to `gateway_fallback.log` + `fallback_local++`)
-   - `ss, ct = mlkem.encaps(ek)` — encaps time logged (~0.03ms Rust / 0.82ms pure Python)
+   - `ss, ct = mlkem.encaps(ek)` - encaps time logged (~0.03ms Rust / 0.82ms pure Python)
    - `nonce = os.urandom(12)`, `aes_ct = AESGCM(ss).encrypt(nonce, telemetry_json_bytes, None)`
    - Packet = ct + nonce + aes_ct, send via TCP to cloud:6000 (`CLOUD_HOST` env var, default 127.0.0.1 local, `cloud:6000` in Docker), EOF framing via `shutdown(SHUT_WR)`
 3. Cloud: recv until EOF, split ct/nonce/aes_ct, `ss = mlkem.decaps(dk, ct)` (~0.04ms Rust / 1.46ms pure Python), `AESGCM(ss).decrypt(nonce, aes_ct)`, JSON parse, insert into SQLite
@@ -615,30 +657,36 @@ plaintext = AESGCM(ss).decrypt(nonce, aes_ct, None)
 
 - **Confidentiality:** ML-KEM secure against quantum (Module-LWE hardness), AES-256-GCM secure
 - **Integrity:** AES-GCM tag verifies tampering on Link2, same as Link1
-- **No forward secrecy for PSK Link1** — documented as weakness (global PSK)
-- **PQC Link2 has no forward secrecy either if dk leaked** — should rotate keys periodically (future)
+- **No forward secrecy for PSK Link1** - documented as weakness (global PSK)
+- **PQC Link2 has no forward secrecy either if dk leaked** - should rotate keys periodically (future)
 - **Replay protection:** Gateway tracks seen nonces for Link1, cloud relies on gateway filtering + timestamp check (future: add nonce cache in cloud too)
 
-### 6.6 LLM Interaction Summary (for 02_)
+### 6.6 Remaining Limitations
 
-- Prompt: "Integrate ML-KEM using mlkem library, show how to generate keypair, encaps, decaps, and build hybrid AES-GCM packet for gateway to cloud"
-- LLM initially suggested `MLKEM512.keygen()` which does not exist in `mlkem==0.0.3`
-- Human correction: tested API via python REPL, found correct is `ML_KEM(ParameterSet.ML_KEM_512).key_gen() -> ek, dk` and `encaps(ek)` / `decaps(dk, ct)` — updated code accordingly, plus dual-wheel fix for Rust vs pure Python
-- Accepted hybrid pattern, rejected pure PQC encryption (ML-KEM not for direct data)
-
-### 6.7 Remaining Limitations
-
-- File-based public key distribution (no cert, no rotation) — documented as Phase1, future should use KMS or mutual TLS with PQC certs
+- File-based public key distribution (no cert, no rotation) - documented as Phase1, future should use KMS or mutual TLS with PQC certs
 - No key rotation, no TTL on seen_nonces (in-memory set grows)
 - ML-KEM-512 only, not 768 (trade-off for simplicity)
 - Pure Python version slower (0.82ms vs 0.03ms) but still negligible for gateway
 
-### 6.8 References (public)
+### 6.7 References
 
-- NIST FIPS 203 ML-KEM standard finalized Aug 2024 [1]
-- ML-KEM sizes: 800B pk, 768B ct [2]
-- [1] https://www.encryptionconsulting.com/education-center/ml-kem-fips-203/
-- [2] https://vucense.com/privacy-sovereignty/post-quantum-cryptography/ml-kem-fips-203-implementation-guide-2026/
+- NIST FIPS 203 ML-KEM standardised in August 2024 - https://www.encryptionconsulting.com/education-center/ml-kem-fips-203/
+- ML-KEM sizes: 800B pk (public key / encapsulation key), 768B ct (ciphertext) - https://vucense.com/privacy-sovereignty/post-quantum-cryptography/ml-kem-fips-203-implementation-guide-2026/
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ---
 
@@ -648,7 +696,7 @@ plaintext = AESGCM(ss).decrypt(nonce, aes_ct, None)
 
 - Device profile: ATmega328P, 16 MHz, 32 KB Flash, **2 KB SRAM**
 - ML-KEM-512 requirements: secret key 1632B + working memory 1000-1500B for polynomial operations = ~3KB total
-- Result: **Stack overflow, crash** — physically impossible to run ML-KEM on 2KB SRAM
+- Result: **Stack overflow, crash** - physically impossible to run ML-KEM on 2KB SRAM
 - Measurement from baseline: ML-KEM-512 secret key alone exceeds 80% of SRAM
 - Conclusion: Legacy device must stay on lightweight symmetric crypto (AES-128-GCM, 16B key, 12B nonce, 28B overhead)
 - Same as real-world IoT: many low-cost sensors cannot be upgraded to PQC without hardware replacement [1][2]
@@ -661,10 +709,10 @@ plaintext = AESGCM(ss).decrypt(nonce, aes_ct, None)
 - Risk: harvest-now-decrypt-later on Link2 if internet-facing
 
 **Phase 1: Hybrid Offload (Current Implementation, 4h scope)**
-- Link1: **Unchanged** — legacy devices keep AES-128-GCM PSK, no firmware update needed
-- Gateway: **Security translator** — decrypts AES-GCM, validates schema, checks replay, then encapsulates with ML-KEM-512 and AES-256-GCM to cloud
-- Link2: **PQC-protected** — `ct(768)||nonce(12)||aes_ct`, cloud decaps and stores in SQLite
-- Public key distribution: **File-based** — cloud writes `cloud_public_key.bin` (800B) on start, gateway reads file. Simple for simulation, documented as tech debt.
+- Link1: **Unchanged** - legacy devices keep AES-128-GCM PSK, no firmware update needed
+- Gateway: **Security translator** - decrypts AES-GCM, validates schema, checks replay, then encapsulates with ML-KEM-512 and AES-256-GCM to cloud
+- Link2: **PQC-protected** - `ct(768)||nonce(12)||aes_ct`, cloud decaps and stores in SQLite
+- Public key distribution: **File-based** - cloud writes `cloud_public_key.bin` (800B) on start, gateway reads file. Simple for simulation, documented as tech debt.
 - Benefits: No legacy disruption, PQC on internet-facing link, fallback possible
 - Trade-off: Gateway is single point of trust, must be hardened (done: try/except, schema, replay)
 
@@ -673,11 +721,11 @@ plaintext = AESGCM(ss).decrypt(nonce, aes_ct, None)
 - Link1 could become hybrid: AES-GCM + ML-KEM, or pure PQC
 - Gateway would support both old PSK and new PQC devices (negotiation)
 - Cloud would support both ML-KEM-512 and 768 (for long-term confidentiality)
-- Requires hardware replacement for old fleet — cost/time (10-20 years for large orgs per CISA)
+- Requires hardware replacement for old fleet - cost/time (10-20 years for large orgs per CISA)
 
 ### 7.3 Fallback Strategy (Business Continuity)
 
-**Goal:** System stays available even if PQC fails, cloud down, or keys missing — critical for org.
+**Goal:** System stays available even if PQC fails, cloud down, or keys missing - critical for org.
 
 | Failure Mode | Detection | Fallback Action | Observability |
 |--------------|-----------|-----------------|---------------|
@@ -689,35 +737,36 @@ plaintext = AESGCM(ss).decrypt(nonce, aes_ct, None)
 
 **Store-and-forward:** `gateway_fallback.log` format: `<unix_timestamp> <json>`, e.g., `1726478400 {"device_id":...}`. Operator can later replay to cloud manually or via script. Minimal persistence.
 
-**Why fallback matters for org:** Per CISA/ENISA guidance, hybrid deployment with fallback ensures legacy devices keep working during PQC migration, avoiding downtime. If PQC implementation has bug, system degrades gracefully to local log, not total outage.
+**Why fallback matters for org:** Per CISA/EU guidance, hybrid deployment with fallback ensures legacy devices keep working during PQC migration, avoiding downtime. If PQC implementation has bug, system degrades gracefully to local log, not total outage.
 
 ### 7.4 Legacy Compatibility Preservation
 
-- **Link1 unchanged:** Same PSK `legacy_secret_16`, same 12B nonce prepended, same EOF framing — legacy device code not modified after baseline
-- **No firmware update required** for ATmega328P — justified by SRAM analysis
-- **Gateway per-device subkeys not implemented** (global PSK) — documented as tech debt, future should have per-device keys in protected Flash
+- **Link1 unchanged:** Same PSK `legacy_secret_16`, same 12B nonce prepended, same EOF framing - legacy device code not modified after baseline
+- **No firmware update required** for ATmega328P - justified by SRAM analysis
+- **Gateway per-device subkeys not implemented** (global PSK) - documented as tech debt, future should have per-device keys in protected Flash
 - **Backward compatibility:** New gateway still accepts old legacy payloads (with required fields), old gateway would reject PQC packets (expected)
 
-### 7.5 LLM Interaction Summary
+### 7.5 Remaining Risks
 
-- Prompt: "Design migration and fallback strategy for legacy ATmega328P that cannot run ML-KEM due to 2KB SRAM, need phased rollout and fallback if cloud PQC fails"
-- LLM suggested: immediate firmware update to all devices to support ML-KEM-768 — rejected as impossible due to SRAM overflow
-- LLM suggested: use TLS 1.3 with PQC for Link1 — rejected, TLS overhead 200-500B too large for 2KB device
-- Accepted: offload pattern (gateway as translator), phased migration, file-based pk distribution for simplicity, store-and-forward fallback log
-- Human evaluation: verified SRAM calculation (1632+1500=~3KB >2KB), tested fallback by stopping cloud and checking `gateway_fallback.log` has entry
+- File-based pk distribution has no authentication - attacker could replace `cloud_public_key.bin` with own key (mitigation future: sign pk file or use cert)
+- `seen_nonces` in-memory set grows forever, no TTL - could OOM with many devices (mitigation: add TTL or LRU cache)
+- Global PSK - if one device extracted, all compromised (mitigation: per-device subkeys)
+- No key rotation for ML-KEM - dk stays in memory (mitigation: rotate daily, persist securely)
 
-### 7.6 Remaining Risks
+### 7.6 References
 
-- File-based pk distribution has no authentication — attacker could replace `cloud_public_key.bin` with own key (mitigation future: sign pk file or use cert)
-- `seen_nonces` in-memory set grows forever, no TTL — could OOM with many devices (mitigation: add TTL or LRU cache)
-- Global PSK — if one device extracted, all compromised (mitigation: per-device subkeys)
-- No key rotation for ML-KEM — dk stays in memory (mitigation: rotate daily, persist securely)
+- EU roadmap, hybrid for legacy, hardware replacement may be needed - https://www.helpnetsecurity.com/2025/07/10/david-warburton-f5-labs-eu-pqc-roadmap/
+- legacy constraints, computational overhead - https://eureka.patsnap.com/report-how-to-adapt-post-quantum-standards-to-existing-legacy-systems
+- CISA PQC initiative, phased migration - https://www.cisa.gov/topics/risk-management/quantum
 
-### 7.7 References (public)
 
-- [1] https://www.helpnetsecurity.com/2025/07/10/david-warburton-f5-labs-eu-pqc-roadmap/ — EU roadmap, hybrid for legacy, hardware replacement may be needed
-- [2] https://eureka.patsnap.com/report-how-to-adapt-post-quantum-standards-to-existing-legacy-systems — legacy constraints, computational overhead
-- [3] https://www.cisa.gov/topics/risk-management/quantum — CISA PQC initiative, phased migration
+
+
+
+
+
+
+
 
 ---
 
@@ -769,7 +818,8 @@ uv run python src/legacy_device.py
 - Check `gateway_fallback.log` → has `<timestamp> <json>`
 - Health 5001 shows `fallback_local++`
 
-### 8.2 Docker Deployment (Simulated, per course Q&A: entire pipeline is simulated, just code)
+
+### 8.2 Docker Deployment (Entire pipeline is simulated, just code)
 
 **Build:**
 ```bash
@@ -793,10 +843,11 @@ docker run --network host python:3.13-slim python src/legacy_device.py
 **Dockerfile respects pyproject.toml + uv.lock + .python-version:**
 - `FROM python:3.13-slim` matches `.python-version` 3.13
 - `COPY pyproject.toml uv.lock .python-version README.md`
-- `RUN pip install uv && uv sync --frozen --no-install-project` — uses locked versions from uv.lock
+- `RUN pip install uv && uv sync --frozen --no-install-project` - uses locked versions from uv.lock
 - `ENV PATH="/app/.venv/bin:$PATH"`
 - `HEALTHCHECK` tries 5000 or 6000 via socket
-- `Dockerfile` implicit convention: `docker-compose.yml` `build: .` implicitly reads `./Dockerfile` (explicit `build: {context: ., dockerfile: Dockerfile}`), `ci.yml` `docker build -t ... .` implicitly `docker build -f Dockerfile -t ... .` — both read same Dockerfile without mentioning name
+- `Dockerfile` implicit convention: `docker-compose.yml` `build: .` implicitly reads `./Dockerfile` (explicit `build: {context: ., dockerfile: Dockerfile}`), `ci.yml` `docker build -t ... .` implicitly `docker build -f Dockerfile -t ... .` - both read same Dockerfile without mentioning name
+
 
 ### 8.3 CI/CD Pipeline (full from 05_ + fixes)
 
@@ -807,26 +858,27 @@ docker run --network host python:3.13-slim python src/legacy_device.py
 **Jobs:**
 1. **test:**
    - `actions/checkout@v4`
-   - `astral-sh/setup-uv@v4` with cache — reads `.python-version` (3.13) automatically
+   - `astral-sh/setup-uv@v4` with cache - reads `.python-version` (3.13) automatically
    - `uv python install && uv python pin 3.13`
-   - `uv sync --frozen --all-groups` — respects `pyproject.toml` + `uv.lock` + dev group `pytest`
+   - `uv sync --frozen --all-groups` - respects `pyproject.toml` + `uv.lock` + dev group `pytest`
    - `uv pip install pytest` fallback
-   - `uv run python -c "import cryptography; import mlkem; print('deps ok')"` — verifies deps
+   - `uv run python -c "import cryptography; import mlkem; print('deps ok')"` - verifies deps
    - `env: PYTHONPATH: ${{ github.workspace }}` + `uv run pytest -v` → 33 tests (was 27/33 baseline, now 33/33 after hardening)
    - `uv run python src/pqc_utils.py` → round-trip test packet 845B, Round-trip OK, `rust_binding` flag
-   - `uv run python -c "import src.pqc_utils; import src.edge_gateway; import src.cloud_service; print('imports ok')"` — ensures 3-tier imports work
-   - `uv run python -c "import sys; sys.path.insert(0,'src'); import edge_gateway; import pqc_utils; print('top-level imports ok')"` — tests top-level imports used by conftest
+   - `uv run python -c "import src.pqc_utils; import src.edge_gateway; import src.cloud_service; print('imports ok')"` - ensures 3-tier imports work
+   - `uv run python -c "import sys; sys.path.insert(0,'src'); import edge_gateway; import pqc_utils; print('top-level imports ok')"` - tests top-level imports used by conftest
    - Verify `pyproject.toml`, `uv.lock`, `.python-version` exist
 
 2. **docker-build:** `needs: test`, builds both images `docker build -t edge-gateway:test .` and `docker build -t cloud-service:test .` to verify Dockerfile respects lock
 
-**Why CI matters:** Ensures gateway hardening (33/33) doesn't regress, PQC utils round-trip works, imports ok for both Rust and pure Python wheels, Docker builds reproducible.
+**Why CI matters:** Ensures gateway hardening (33/33) doesn't regress, PQC utils round-trip works, imports ok for both Rust and pure Python wheels, Docker builds are reproducible.
 
 **Runtime table (linkage of files):**
 - `pyproject.toml+uv.lock+.python-version` used local+CI+Docker
 - `Dockerfile` used local Docker + CI docker-build
 - `docker-compose.yml` local only (CI does not run `compose up`, only `docker build` verification)
-- `ci.yml` GitHub Actions only (push to main/arena/* PRs, test first then docker-build needs: test)
+- `ci.yml` GitHub Actions only (push to main/arena/* PRs, `test` first then docker-build needs `test` to complete)
+
 
 ### 8.4 Monitoring, Logging, PQC Observability (full)
 
@@ -858,15 +910,7 @@ docker run --network host python:3.13-slim python src/legacy_device.py
 - Queries: `COUNT`, `AVG(temperature)`, `AVG(humidity)`, `last 10 ORDER BY received_at DESC`
 - Useful for managers: see how many messages protected by PQC vs fallback, avg temp, recent telemetry
 
-### 8.5 LLM Interaction Summary (for 02_)
-
-- Prompt: "Generate Docker and CI/CD for Python project with uv, need to respect pyproject.toml, uv.lock, .python-version, simple healthchecks, docker-compose for gateway and cloud"
-- LLM initially suggested `pip install -r requirements.txt` — rejected, project uses `uv` and `pyproject.toml`, not requirements.txt
-- LLM suggested Flask for health endpoints — rejected, adds extra dep, we used stdlib `http.server` to keep simple
-- Accepted: `astral-sh/setup-uv` action, `uv sync --frozen`, Dockerfile with `uv sync --no-install-project`, `ENV PATH .venv/bin`, HEALTHCHECK via socket connect, docker-compose with `depends_on healthy` and volume sharing for pk file
-- Human verification: ran `pytest -v` 33 passed, `docker build` verified via CI (no docker in sandbox, but verified Dockerfile copies correct files and uses uv), fixed to add `PYTHONPATH` and `--all-groups` and `import os`
-
-### 8.6 Remaining Ops Gaps
+### 8.5 Remaining Ops Gaps
 
 - No Prometheus/Grafana (JSON health only, documented as simple)
 - No log rotation (logs grow forever, should add `RotatingFileHandler`)
@@ -874,9 +918,20 @@ docker run --network host python:3.13-slim python src/legacy_device.py
 - File-based pk sharing via bind mount not secure for production (should use secret manager/KMS)
 - DB single file no backup, no replication
 
+
+
+
+
+
+
+
+
+
+
 ---
 
-## 9. Testing & Evaluation (full details)
+## 9. Testing & Evaluation
+
 
 ### 9.1 Pytest 33 Tests (from 01_ + 02_)
 
@@ -888,8 +943,8 @@ docker run --network host python:3.13-slim python src/legacy_device.py
 - **2 negative:** legacy main propagates connection refused, gateway startup propagates bind failure
 
 **Results:**
-- Baseline: 27 passed, 6 failed (gateway crash, no schema, no replay) — preserved as gap analysis
-- After hardening (try/except + REQUIRED_FIELDS + seen_nonces): 33 passed, 0 failed, both Rust and pure Python venvs
+- **Baseline: 27 passed, 6 failed (gateway crash, no schema, no replay) - preserved for gap analysis before hardening**
+- **After hardening (try/except + REQUIRED_FIELDS + seen_nonces): 33 passed, 0 failed, both Rust and pure Python venvs**
 - Large packet test updated: originally payload `{"device_id":..., "samples": "x"*5000}` missing required fields, after adding schema validation it failed, updated to include required fields + samples to still test buffer accumulation
 
 ### 9.2 Manual Tamper Test (from 01_)
@@ -955,6 +1010,14 @@ uv run python src/pqc_utils.py
 - `arena` run `38102098201` success 38s
 - Both run `pytest -v` 33 tests, `pqc_utils.py` round-trip, import checks
 
+
+
+
+
+
+
+
+
 ---
 
 ## 10. Final Evaluation (full details from 06_final_evaluation.md v3)
@@ -970,7 +1033,7 @@ E2E evidence: 2 legacy sends → gateway `received 2, forwarded 2`, cloud `db_ro
 - **End-to-end 3-tier works:** Legacy AES-128-GCM PSK (TCP 5000, EOF) → gateway decrypt + validate + replay check → PQC hybrid `ct(768)||nonce(12)||aes_ct` ~845B → cloud decaps + SQLite insert. Satisfies core requirement: integrate ML-KEM into at least one path (Link2 internet-facing) while preserving Link1 (no firmware change for 2KB SRAM sensor).
 - **Robust gateway (was crashing):** Previously gateway crashed on `InvalidTag` exit 1. Now wrapped in `try/except InvalidTag, ValueError, UnicodeDecodeError, JSONDecodeError`, logs warning, continues. Schema validation `REQUIRED_FIELDS` + replay cache `seen_nonces=set()` stores 12B random nonces seen → 33/33 (was 27/33).
 - **Minimal but functional PQC:** Library `mlkem==0.0.3` supports both Rust binding (rust.so 909KB, fast) and pure Python (fastmath.so 80KB, empty __init__.py) wheels via dual-wheel fix with `RUST_BINDING` flag, chosen over `kyber-py` and `liboqs` for simplicity. ML-KEM-512 selected for lowest overhead 800B pk + 768B ct = 1568B vs 2272B for 768. Hybrid with AES-256-GCM ss 32B as key. Measured encaps ~0.03ms Rust / 0.82ms pure Python, decaps ~0.04ms / 1.46ms negligible for gateway.
-- **Simple DB as observability:** SQLite `telemetry.db` stdlib, 1 table, no ORM, `COUNT, AVG(temp/humidity), last 10`, exposed via cloud health 6001 JSON and gateway health 5001 metrics — managers see PQC vs fallback, avg temp, recent telemetry.
+- **Simple DB as observability:** SQLite `telemetry.db` stdlib, 1 table, no ORM, `COUNT, AVG(temp/humidity), last 10`, exposed via cloud health 6001 JSON and gateway health 5001 metrics - managers see PQC vs fallback, avg temp, recent telemetry.
 - **Fallback ensures availability:** If `cloud_public_key.bin` missing or cloud unreachable (TCP 6000 refused/timeout), gateway appends `<timestamp> <json>` to `gateway_fallback.log` + `fallback_local++`. Cloud decaps fail → `decaps_fail++` but stays alive. Business continuity per CISA hybrid guidance.
 - **Operations complete but simple:** CI via `astral-sh/setup-uv` reading `.python-version` + `uv.lock`, `uv sync --frozen --all-groups` + `pytest -v`; Dockerfile `python:3.13-slim` + `uv sync --frozen --no-install-project` (respects lock); docker-compose with named volume `pqc-shared` for pk sharing, healthchecks, `depends_on healthy`; logging to files (`gateway.log`, `cloud.log`, `pqc.log`) to keep stdout clean for tests; health endpoints via stdlib `http.server` (no Flask).
 
@@ -983,7 +1046,7 @@ E2E evidence: 2 legacy sends → gateway `received 2, forwarded 2`, cloud `db_ro
 | **File-based pk (public key) distribution, no auth (authentication)** | `cloud_public_key.bin` 800B has no signature. If attacker replaces file on disk, they can do MITM (Man-In-The-Middle) on Link2 gateway→cloud. | Medium (MITM) | Sign pk file with private key, use certificate, or fetch via TLS with pinning, or KMS (Key Management System) |
 | **No key rotation** | ML-KEM dk (decapsulation key = private key 1632B) stays in memory forever, never changed. If leaked, all past and future Link2 messages compromised (no forward secrecy = old messages can be decrypted). | Medium (long-term exposure) | Rotate daily, store dk in HSM (Hardware Security Module) or encrypted file, versioned keys |
 | **No TLS (Transport Layer Security) on Link2** | PQC KEM gives confidentiality but no server authentication beyond file-based pk. Gateway does not know it really talks to real cloud. | Medium (no server auth) | Add TLS 1.3 with PQC certificates or hybrid certs |
-| **Single-threaded gateway (data plane) — concurrent starvation risk** | **2 threads total:** (1) main TCP data thread `accept()` + blocking `recv()` = waits for one sensor at a time, (2) health HTTP thread 5001. **Concurrent starvation** = while gateway processes one sensor (decrypt, validate, forward to cloud), other sensors that connect at same time wait in TCP queue (they starve, not served). If 100 sensors send at once, they timeout. This does NOT contradict single-threaded point — we intentionally said single-threaded for simplicity, 2 threads total but only 1 handles sensor data. | Low (scalability) | `asyncio` (asynchronous I/O) or thread pool (rejected for simplicity) |
+| **Single-threaded gateway (data plane) - concurrent starvation risk** | **2 threads total:** (1) main TCP data thread `accept()` + blocking `recv()` = waits for one sensor at a time, (2) health HTTP thread 5001. **Concurrent starvation** = while gateway processes one sensor (decrypt, validate, forward to cloud), other sensors that connect at same time wait in TCP queue (they starve, not served). If 100 sensors send at once, they timeout. This does NOT contradict single-threaded point - we intentionally said single-threaded for simplicity, 2 threads total but only 1 handles sensor data. | Low (scalability) | `asyncio` (asynchronous I/O) or thread pool (rejected for simplicity) |
 | **Logs no rotation, DB no backup** | `gateway.log`, `cloud.log`, `pqc.log` grow forever → disk full. `telemetry.db` single file, no backup → data loss if disk fails. | Low | `RotatingFileHandler`, periodic DB backup/replication |
 
 We intentionally kept these for simplicity per course guidance: keep it plain and simple, don't make project bigger than needed.
@@ -1008,26 +1071,37 @@ Current integration minimal viable and works E2E (tested). If PQC path fails:
 
 - **Cloud down or pk (public key) missing:** Gateway fallback to `gateway_fallback.log` ensures no data loss (business continuity). Operator can replay log later.
 - **Decaps fail (decapsulation = private key decrypt fails):** Cloud increments `decaps_fail`, logs warning, stays alive, `success_rate` exposed via health 6001 shows degradation.
-- **Gaps documented:** No key rotation, no cert (certificate), ML-KEM-512 only (not 768 for long-term confidentiality), file-based distribution. For peer review, sufficient — 3-tier works, PQC path exists, fallback documented, per course guidance that incomplete integration is OK if documented in final evaluation.
+- **Gaps documented:** No key rotation, no cert (certificate), ML-KEM-512 only (not 768 for long-term confidentiality), file-based distribution. For peer review, sufficient - 3-tier works, PQC path exists, fallback documented, per course guidance that incomplete integration is OK if documented in final evaluation.
 
 ### 10.6 Conclusion
 
 System meets peer review requirements with simple design: legacy compatibility preserved (Link1 unchanged, no firmware update needed for 2KB SRAM device), PQC added on internet-facing Link2 via gateway offload pattern, with SQLite DB and analytics as observability and fallback for availability. Tests improved from 27/33 to 33/33 after hardening. CI/CD and Docker respect `pyproject.toml` + `uv.lock` + `.python-version` for reproducibility.
 
-Remaining work is tech debt (global PSK, replay cache TTL, pk authentication, key rotation, TLS, scalability) prioritized for future sprints. LLM was used as untrusted assistant (10 interactions logged in 02_) and manually evaluated via pytest, REPL API testing, E2E checks — insecure suggestions (static nonce, `MLKEM512.keygen()`, Flask, requirements.txt) were rejected or corrected.
+Remaining work is to clear technical debt (global PSK, replay cache TTL, pk authentication, key rotation, TLS, scalability) prioritized for future sprints. LLM was used as an untrusted assistant (10 interactions logged in [02_design_decisions_n_key_llm_interactions.md](02_design_decisions_n_key_llm_interactions.md)) and manually evaluated via pytest. Insecure or wrong suggestions (static nonce, `MLKEM512.keygen()`, Flask, requirements.txt) were rejected or corrected.
+
+
+
+
+
+
+
+
+
 
 ---
 
-## 11. References (public, for Part1)
+## 11. References
 
-- [1] NIST FIPS 203 ML-KEM standard finalized Aug 2024 https://www.encryptionconsulting.com/education-center/ml-kem-fips-203/
-- [2] ML-KEM sizes: 800B pk, 768B ct https://vucense.com/privacy-sovereignty/post-quantum-cryptography/ml-kem-fips-203-implementation-guide-2026/
-- [3] CISA PQC Initiative, phased risk-based migration, harvest-now-decrypt-later https://www.cisa.gov/topics/risk-management/quantum
-- [4] EU PQC roadmap hybrid-PQC ciphers/certificates for legacy compatibility https://www.helpnetsecurity.com/2025/07/10/david-warburton-f5-labs-eu-pqc-roadmap/
-- [5] Legacy constraints, computational overhead https://eureka.patsnap.com/report-how-to-adapt-post-quantum-standards-to-existing-legacy-systems
-- [6] CISA product categories list Jan 2026 — prioritizing PQC-capable products in procurement
-- [7] ENISA/EU PQC roadmap — inventory of all systems performing crypto, legacy low-cost IoT may need hardware replacement
-- [8] grp28 example documentation structure (non-authoritative, not committed) — inspired TOC, requirements mapping, architecture diagrams, LLM logs, testing evidence, operations, final eval
+- NIST FIPS 203 ML-KEM standardised in August 2024 - https://www.encryptionconsulting.com/education-center/ml-kem-fips-203/
+- ML-KEM sizes: 800B pk (public key / encapsulation key), 768B ct (ciphertext) - https://vucense.com/privacy-sovereignty/post-quantum-cryptography/ml-kem-fips-203-implementation-guide-2026/
+- EU roadmap, hybrid for legacy, hardware replacement may be needed - https://www.helpnetsecurity.com/2025/07/10/david-warburton-f5-labs-eu-pqc-roadmap/
+- legacy constraints, computational overhead - https://eureka.patsnap.com/report-how-to-adapt-post-quantum-standards-to-existing-legacy-systems
+- CISA PQC initiative, phased migration - https://www.cisa.gov/topics/risk-management/quantum
+
+
+
+
+
 
 ---
 
@@ -1035,15 +1109,16 @@ Remaining work is tech debt (global PSK, replay cache TTL, pk authentication, ke
 
 ### 12.1 Files (full codebase)
 
-- `src/legacy_device.py` (59 lines, AES-128-GCM, 12B nonce, EOF)
-- `src/edge_gateway.py` (388 lines, hardened, PQC forwarding, fallback, health 5001, file logging, metrics, replay cache)
-- `src/pqc_utils.py` (258 lines, dual-wheel Rust/pure Python support, constants, keygen, encrypt/decrypt, metrics, logging)
-- `src/cloud_service.py` (400 lines, TCP 6000 data, health 6001 analytics, SQLite DB, init_db, insert_telemetry, get_analytics, metrics)
+- `src/legacy_device.py` (AES-128-GCM, 12B nonce, EOF)
+- `src/edge_gateway.py` (hardened, PQC forwarding, fallback, health 5001, file logging, metrics, replay cache)
+- `src/pqc_utils.py` (dual-wheel Rust/pure Python support, constants, keygen, encrypt/decrypt, metrics, logging)
+- `src/cloud_service.py` (TCP 6000 data, health 6001 analytics, SQLite DB, init_db, insert_telemetry, get_analytics, metrics)
 - `tests/unit/test_legacy_device_and_gateway.py` (5 tests), `tests/unit/test_security_and_invalid_inputs.py` (11 tests), `tests/integration/test_gateway_tcp_flow.py` (2 tests), `tests/integration/test_gateway_failure_and_robustness.py` (10 tests, including large packet >1024B), `tests/conftest.py` (PROJECT_ROOT + SOURCE_DIRECTORY in sys.path, GatewayProcess with queue.Queue, ephemeral ports)
-- `documentation/01_baseline_analysis.md` (236 lines, full baseline), `02_design_decisions_n_key_llm_interactions.md` (237 lines, 10+3 interactions), `03_mlkem_integration.md` (112 lines), `04_migration_fallback_strategy.md` (78 lines), `05_operations.md` (142 lines), `06_final_evaluation.md` (79 lines v3), `part1_documentation.md` (this file, consolidated, now includes full details from 01-06 so reviewers can refer only to this file), `00_4h_gaps_analysis_n_scope_plan.md` (272 lines, progress log with checkboxes, pre-check 27/33 → 33/33)
+- `documentation/01_baseline_analysis.md` (full baseline), `02_design_decisions_n_key_llm_interactions.md`, `03_mlkem_integration.md`, `04_migration_fallback_strategy.md`, `05_operations.md`, `06_final_evaluation.md`, `part1_documentation.md` (this file consolidating our other documentation in parts so reviewers can refer only to this file)
 - `documentation/archive/02_rough_document_legacy_device.md`, `03_how_to_run_baselinecode_without_cloud.md`, `04_understand_links_between_docker_files.md` (archive, not required but kept)
-- `.github/workflows/ci.yml` (111 lines, test + docker-build, setup-uv, PYTHONPATH, --all-groups), `Dockerfile` (python:3.13-slim, uv sync --frozen, HEALTHCHECK), `docker-compose.yml` (cloud+gateway, healthchecks, depends_on healthy, volume pqc-shared)
-- `pyproject.toml`, `uv.lock`, `.python-version` (3.13), `README.md` (updated members order)
+- `.github/workflows/ci.yml` (test + docker-build, setup-uv, PYTHONPATH, --all-groups), `Dockerfile` (python:3.13-slim, uv sync --frozen, HEALTHCHECK), `docker-compose.yml` (cloud+gateway, healthchecks, depends_on healthy, volume pqc-shared)
+- `pyproject.toml`, `uv.lock`, `.python-version` (3.13), `README.md`
+
 
 ### 12.2 How to Run Tests (full)
 
@@ -1076,11 +1151,11 @@ docker build -t cloud-service:test .
 docker-compose up --build
 ```
 
-### 12.3 LLM Prompts Full Log (summary, full in 02_)
+### 12.3 LLM Interactions Full Log (summary, full in 02_)
 
-See `02_design_decisions_n_key_llm_interactions.md` sections 1.1-1.10 + fixes 11-13 for full prompts, output summaries, human review, accepted/modified/rejected, verification via pytest/REPL/curl.
+See [02_design_decisions_n_key_llm_interactions.md sections 1.1-1.10](02_design_decisions_n_key_llm_interactions.md) for our major LLM prompt interactions and human review (accepted/modified/rejected).
 
-**Key prompts (10 + 3 fixes):**
+**Key prompts (10 LLM Interactions + 3 human fixes):**
 - Interaction1: "Write two Python scripts using cryptography library... legacy_device.py encrypts... edge_gateway.py listens..."
 - Interaction2: "Should we use WebSockets or HTTP REST..."
 - Interaction3: "How should edge gateway know when sensor finished sending..."
@@ -1094,7 +1169,3 @@ See `02_design_decisions_n_key_llm_interactions.md` sections 1.1-1.10 + fixes 11
 - Fix11: "ModuleNotFoundError: No module named 'src'" → robust sys.path handling in conftest + edge_gateway + cloud_service
 - Fix12: "ImportError: cannot import name 'ML_KEM' from 'mlkem'" → dual-wheel support Rust vs pure Python
 - Fix13: "NameError: name 'os' is not defined" → add import os in cloud_service
-
----
-
-**End of Part1 consolidated documentation — reviewers can read ONLY this file for full details; sub-docs 01-06 provide separate focus if they wish.**
