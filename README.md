@@ -2,6 +2,7 @@
 * **Members:** Kaiquan Mah | Quoc Nguyen | Danish Sharjeel | Manh Nguyen | Kim Nguyen  
 * **Python:** 3.13, package manager `uv`, deps `cryptography>=50.0.1`, `mlkem>=0.0.3`  
 * **Tests:** 33 passed (was 27/33 baseline)
+* **Repository** is accessible from: https://github.com/kai-oulu/oulu-sdmo-group23/tree/main
 
 
 ## Project Overview
