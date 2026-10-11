@@ -490,15 +490,21 @@ telemetry(
 - **Single-Client Synchronous Blocking Loop:** `edge_gateway.py` executes single-threaded synchronous loop `accept()` + blocking `recv()`. While gateway reads/decrypts from one sensor, no other sensor can connect. If one client stalls, gateway hangs for all nodes. Documented as scalability tech debt.
 - **TCP Handshake Overhead:** Using connection closure (EOF) as message boundary requires opening/closing TCP socket for each reading. Every reading requires full TCP 3-way handshake SYN→SYN-ACK→ACK and teardown FIN→ACK, introducing latency. Trade-off for simplicity.
 
-### 5.4 Remaining Project Risks and Mitigation Roadmap (from 02_, now consolidated into R1-R7 in Section 10)
+### 5.4 Remaining Project Risks and Mitigation Roadmap (consolidated R1-R7, full from 06_ — authoritative risks table, also repeated in Section 10.4)
 
-| # | Identified Risk | Severity | Potential Impact | Planned Mitigation Strategy |
-| :---: | :--- | :---: | :--- | :--- |
-| **R1** | Gateway Denial of Service (Crash via Malformed Input) | High | Single bad transmission terminates gateway | Wrap socket parsing and decryption in try...except (InvalidTag, ValueError, UnicodeDecodeError) to log anomalies and keep listening loop alive — **Mitigated** |
-| **R2** | Replay Attacks on Legacy Link | Medium | Stale/malicious telemetry reinjected | Add sliding-window timestamp validator or track seen nonces in in-memory cache with TTL — **Partially mitigated** with seen_nonces set, no TTL remains |
-| **R3** | Pre-Shared Key (PSK) Extraction | Medium | Physical tampering exposes symmetric key | Use protected internal Flash, plan per-device subkeys rather than global — **Not mitigated** |
-| **R4** | PQC Performance & Memory Overhead on Gateway | Medium | Integrating mlkem for Cloud forwarding may increase CPU latency | Benchmark ML-KEM-512 encaps time and memory footprint — **Mitigated/measured** 0.03ms Rust / 0.82ms pure |
-| **R5** | Scalability & Concurrent Node Starvation | Low | Multiple sensors transmitting simultaneously cause timeouts | Refactor to asyncio or multi-threaded worker pool — **Not mitigated**, 2 threads total (1 data + 1 health) |
+**Note:** 02_ originally listed R1-R5 (baseline risks). After implementing PQC (Link2), SQLite DB, and file-based pk distribution, we added R6 (pk MITM) and R7 (DB backup) in 06_ v3. Status now shows Mitigated vs Not mitigated with remaining work — this is the table reviewers should use. Same table appears in Section 10.4 Final Evaluation.
+
+| # | Risk | Severity | Status | Remaining (what still needs fixing) |
+|---|------|----------|--------|--------------------------------------|
+| **R1** | Gateway DoS (Denial of Service) via malformed input (crash on InvalidTag) | High | **Mitigated:** try/except + schema + replay, now 33/33 pass, stays alive | Large payload could still cause high CPU when decrypting, should add rate limiting |
+| **R2** | Replay attacks (stale telemetry reinjected) | Medium | **Mitigated:** seen_nonces set rejects replayed nonce (if nonce already seen, drop) | No TTL (Time To Live), restart clears cache → replay possible after restart. Should add timestamp window: only accept packets where `now - timestamp < 5 min`, and keep nonces only for that window |
+| **R3** | PSK (Pre-Shared Key) extraction (physical tampering) | Medium | **Not mitigated:** global PSK still | Per-device keys, protected Flash |
+| **R4** | PQC performance & memory overhead | Medium | **Mitigated/measured:** encaps 0.03ms Rust / 0.82ms pure Python, decaps 0.04ms / 1.46ms negligible for gateway (Linux/Pi) | 800B pk (public key) + 768B ct (ciphertext) overhead matters for constrained radio. **Constrained radio** = low-power wireless like LoRaWAN, Zigbee, BLE, NB-IoT with small MTU (e.g., 51-250B max), low bandwidth, battery-powered. Sending 1568B extra each message is heavy for them (needs fragmentation, more battery). In our simulated TCP/Ethernet setup it's fine, but for real battery sensor with LoRa it would be problem. |
+| **R5** | Scalability & concurrent starvation | Low | **Not mitigated:** single-threaded data plane (2 threads total, 1 for data) | asyncio or thread pool future |
+| **R6** | File-based pk (public key) MITM (Man-In-The-Middle) | Medium | **Not mitigated:** pk file no auth (authentication) | Sign pk or use secure distribution (cert, TLS pinning, KMS) |
+| **R7** | DB (Database) no backup | Low | **Not mitigated:** single file `telemetry.db` | Periodic backup |
+
+Overall: High-severity R1 fixed, medium R2 partially fixed, others documented as debt. Full details also in Section 10.4 with acronyms expanded.
 
 ---
 
