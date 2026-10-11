@@ -1,7 +1,6 @@
 """
-Created 2026.10.10
 PQC Utilities for ML-KEM-512 hybrid encryption (Link 2: Gateway -> Cloud)
-- Uses mlkem library (Rust binding) with NIST FIPS 203 ML-KEM-512
+- Uses mlkem library with NIST FIPS 203 ML-KEM-512
 - Supports BOTH Rust binding (fast, has mlkem.rust) and pure Python (fastmath) versions
 - Hybrid pattern: ML-KEM encaps -> 32B shared secret -> AES-256-GCM encrypt telemetry
 - Wire format: ct(768) || nonce(12) || aes_ciphertext+tag
@@ -13,6 +12,7 @@ import os
 import time
 from pathlib import Path
 from typing import Tuple
+
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 # --- Robust mlkem import for CI compatibility ---
@@ -63,16 +63,15 @@ except ImportError as e_rust:
             f"and pure Python (error: {e_pure}). Install with `pip install mlkem==0.0.3`"
         )
 
-# Constants for ML-KEM-512 (lightest, suitable for gateway)
-PK_LEN = 800    # Encaps key (public) length
-SK_LEN = 1632   # Decaps key (secret) length
-CT_LEN = 768    # Ciphertext length
-SS_LEN = 32     # Shared secret length
-NONCE_LEN = 12  # AES-GCM nonce
+# --- Constants for ML-KEM-512 (lightest, suitable for gateway) ---
+PK_LEN = 800
+SK_LEN = 1632
+CT_LEN = 768
+SS_LEN = 32
+NONCE_LEN = 12
 
 CLOUD_PK_PATH = Path(os.getenv("CLOUD_PK_PATH", "cloud_public_key.bin"))
 
-# Use file logging to avoid polluting stdout in tests
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
@@ -80,6 +79,7 @@ logging.basicConfig(
         logging.FileHandler("pqc.log"),
     ],
 )
+
 
 def get_mlkem_instance():
     """Get ML-KEM-512 instance - works for both Rust and pure Python versions"""
@@ -107,15 +107,13 @@ def generate_keypair(
     """
     Generate ML-KEM-512 keypair and save public key to file.
     Returns (ek_bytes, dk_bytes, mlkem_obj)
-    ek = encaps key (public, 800B), dk = decaps key (secret, 1632B)
     Works for both Rust and pure Python versions.
     """
-
     mlkem_obj = get_mlkem_instance()
 
     if RUST_BINDING:
         # Rust: key_gen() returns (EncapsKey, DecapsKey) objects
-        ek, dk = mlkem_obj.key_gen()  # ek is EncapsKey, dk is DecapsKey
+        ek, dk = mlkem_obj.key_gen()
         ek_bytes = ek.to_bytes()
         dk_bytes = dk.to_bytes()
     else:
@@ -125,7 +123,6 @@ def generate_keypair(
     assert len(ek_bytes) == PK_LEN, f"Unexpected pk len {len(ek_bytes)}"
     assert len(dk_bytes) == SK_LEN, f"Unexpected sk len {len(dk_bytes)}"
 
-    # Save public key for gateway to read (file-based distribution - Phase1)
     save_path.parent.mkdir(parents=True, exist_ok=True)
     save_path.write_bytes(ek_bytes)
     logging.info(
@@ -161,9 +158,6 @@ def load_public_key(path: Path = CLOUD_PK_PATH) -> bytes:
 def encrypt_for_cloud(plaintext: bytes, ek_bytes: bytes) -> Tuple[bytes, dict]:
     """
     Hybrid encrypt: ML-KEM encaps + AES-256-GCM
-    Returns (packet, metrics)
-    packet = ct(768) || nonce(12) || aes_ct+tag
-    metrics = {encaps_ms, aes_encrypt_ms, ct_len, total_len}
     Works for both Rust and pure Python mlkem versions.
     """
     start = time.time()
@@ -193,15 +187,13 @@ def encrypt_for_cloud(plaintext: bytes, ek_bytes: bytes) -> Tuple[bytes, dict]:
     assert len(ss) == SS_LEN
     assert len(ct) == CT_LEN
 
-    # AES-256-GCM encrypt plaintext with ss as key
     aes_start = time.time()
     nonce = os.urandom(NONCE_LEN)
-    aesgcm = AESGCM(ss)  # ss is 32B -> AES-256
+    aesgcm = AESGCM(ss)
     aes_ct = aesgcm.encrypt(nonce, plaintext, None)
     aes_ms = (time.time() - aes_start) * 1000
 
     packet = ct + nonce + aes_ct
-
     total_ms = (time.time() - start) * 1000
     metrics = {
         "encaps_ms": round(encaps_ms, 2),
@@ -218,18 +210,13 @@ def encrypt_for_cloud(plaintext: bytes, ek_bytes: bytes) -> Tuple[bytes, dict]:
     logging.info(
         f"PQC encrypt (rust={RUST_BINDING}): encaps {metrics['encaps_ms']}ms, AES {metrics['aes_encrypt_ms']}ms, total {len(packet)}B"
     )
-
     return packet, metrics
 
 
 def decrypt_from_gateway(
     packet: bytes, dk_bytes: bytes, mlkem_obj=None
 ) -> Tuple[bytes, dict]:
-    """
-    Hybrid decrypt: split packet, decaps ct -> ss, AES-GCM decrypt
-    works for both Rust and pure Python
-    Returns (plaintext, metrics)
-    """
+    """Hybrid decrypt - works for both Rust and pure Python"""
     start = time.time()
 
     if len(packet) < CT_LEN + NONCE_LEN + 16:
@@ -239,7 +226,6 @@ def decrypt_from_gateway(
     nonce = packet[CT_LEN : CT_LEN + NONCE_LEN]
     aes_ct = packet[CT_LEN + NONCE_LEN :]
 
-    # Decaps
     if mlkem_obj is None:
         mlkem_obj = get_mlkem_instance()
 
@@ -263,7 +249,6 @@ def decrypt_from_gateway(
 
     assert len(ss) == SS_LEN
 
-    # AES decrypt
     aes_start = time.time()
     aesgcm = AESGCM(ss)
     plaintext = aesgcm.decrypt(nonce, aes_ct, None)
@@ -282,11 +267,9 @@ def decrypt_from_gateway(
     logging.info(
         f"PQC decrypt (rust={RUST_BINDING}): decaps {metrics['decaps_ms']}ms, AES {metrics['aes_decrypt_ms']}ms, total {len(packet)}B"
     )
-
     return plaintext, metrics
 
 
-# Simple self-test when run directly
 if __name__ == "__main__":
     print(f"Testing PQC utils round-trip (rust_binding={RUST_BINDING})...")
     ek_b, dk_b, mlkem_o = generate_keypair(Path("/tmp/test_pk.bin"))
@@ -297,4 +280,3 @@ if __name__ == "__main__":
     print(f"Decrypted: {plain}, metrics {dec_metrics}")
     assert plain == msg
     print("Round-trip OK!")
-

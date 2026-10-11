@@ -1,8 +1,7 @@
-# Created 2026.10.10
 name: CI - Build and Test
 
 # When does CI run?
-# - On push to main or arena/* branches (my working branch is arena/...)
+# - On push to main or arena/* branches (your working branch is arena/...)
 # - On pull requests to main
 # This ensures every commit is tested before peer review / final submission
 
@@ -38,16 +37,7 @@ jobs:
 
       - name: Sync dependencies from pyproject.toml + uv.lock (frozen)
         run: |
-          # 2026.10.10
-          # uv sync --frozen
-          # # --frozen means use exact versions from uv.lock, don't update lock
-          # # This respects pyproject.toml dependencies (cryptography>=50.0.1, mlkem>=0.0.3)
-          # # and uv.lock locked versions (e.g., cffi 2.1.1, etc.)
-          # # For local dev you would run `uv sync` without --frozen
-          # # Install pytest as dev tool (not in uv.lock main deps, but in [dependency-groups].dev)
-          # uv pip install pytest
-
-          # 2026.10.11 FIX for CI error ModuleNotFoundError: No module named 'src':
+          # FIX for CI error ModuleNotFoundError: No module named 'src':
           # - Previously `uv sync --frozen` only installed main deps (cryptography, mlkem), not dev group (pytest)
           # - Then `uv pip install pytest` installed pytest via pip, but did not ensure src/ and project root in PYTHONPATH
           # - Now use --all-groups to install dev deps via uv.lock, and also install pytest via pip as fallback
@@ -55,24 +45,32 @@ jobs:
           uv pip install pytest
           uv run python -c "import cryptography; import mlkem; print('deps ok:', cryptography.__version__, mlkem.__file__)"
 
-
       - name: Run tests (33 tests) via uv
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
+          # FIX: set PYTHONPATH to workspace so `import src.pqc_utils` works, and conftest now inserts both project root and src/
           uv run pytest -v
           # Runs 33 tests: unit (legacy_device, gateway, security) + integration (TCP flow, failure robustness)
           # Previously 27 passed, 6 failed (gateway crash, no schema, no replay) - now 33 passed after hardening
           # This is the critical check before Docker build
 
       - name: Test PQC utils round-trip via uv
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           uv run python src/pqc_utils.py
           # Tests ML-KEM-512 keygen (pk 800B, sk 1632B), encaps (ss 32B, ct 768B), decaps, AES-GCM hybrid round-trip
           # Expected: Encrypted packet len ~845B, Round-trip OK
 
       - name: Check 3-tier imports via uv
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           uv run python -c "import src.pqc_utils; import src.edge_gateway; import src.cloud_service; print('imports ok')"
           # Ensures all three services can be imported after dependency sync
+          # Also test top-level imports used by conftest: `import edge_gateway` after inserting src/ into path
+          uv run python -c "import sys; sys.path.insert(0, 'src'); import edge_gateway; import pqc_utils; print('top-level imports ok')"
 
       - name: Verify pyproject.toml + uv.lock + .python-version consistency
         run: |
@@ -101,7 +99,7 @@ jobs:
   #   - docker-compose adds extra: services cloud and gateway, ports, volumes, healthchecks, depends_on
   #   - CI does NOT run docker-compose up (no need, just verifies images build)
   #   - For local deployment, you run `docker-compose up --build` which builds same Dockerfile and runs both services
-  #   - Legacy device is an ephemeral client: in Docker, run on host `python src/legacy_device.py` which connects to host 5000 -> mapped to gateway container 5000
+  #   - Legacy device is ephemeral client: in Docker, run on host `python src/legacy_device.py` which connects to host 5000 -> mapped to gateway container 5000
   #   - Or via `docker run --network host` to connect to gateway:5000 via Docker network
   docker-build:
     runs-on: ubuntu-latest
@@ -118,3 +116,4 @@ jobs:
           # This verifies Dockerfile works, which is same Dockerfile used by docker-compose.yml
           # docker-compose.yml is for local deployment simulation, not used in CI (CI just builds images)
           # For local: docker-compose up --build runs same Dockerfile for both cloud and gateway services
+
