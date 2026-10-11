@@ -109,6 +109,79 @@ In accordance with course guidelines, this section logs the human-AI interaction
   * **Conclusion & Decision:** The test code was verified to be correct and complete. Rather than prompting the LLM further to implement fixes in the gateway code, the developer preserved the failing tests to show that this was a limitation in the baseline code.
 
 
+### 1.6. Interaction 6 (Gateway Hardening): Fixing 6 Failing Tests
+
+* **Context / Objective:** Fix gateway to not crash on malformed packets, add schema validation and replay protection, make 33/33 tests pass.
+* **Prompt Given to LLM:**
+  > *"My edge_gateway.py crashes when it receives malformed AES-GCM packets (InvalidTag) and it accepts any JSON without validating required fields device_id, timestamp, temperature, humidity, status, and it doesn't check for replayed nonces. How should I harden it to pass these tests: test_gateway_remains_available_after_malformed_nonempty_packet, test_gateway_remains_available_after_connection_closes_mid_packet, test_gateway_remains_available_after_two_packets_share_one_connection, test_gateway_rejects_authenticated_non_json_payload_and_processes_valid_packet, test_gateway_rejects_wrong_telemetry_schema_and_processes_valid_packet, test_gateway_rejects_replayed_packet_and_processes_new_valid_packet? Keep it simple, single-threaded, with logging and metrics."*
+* **LLM Output Summary:**
+  * Suggested wrapping decrypt in try/except InvalidTag, ValueError, UnicodeDecodeError, JSONDecodeError, logging warning and continuing loop
+  * Suggested REQUIRED_FIELDS set and `REQUIRED_FIELDS.issubset(payload.keys())` for schema validation
+  * Suggested `seen_nonces=set()` for replay protection, check `if nonce in seen_nonces: reject`, add after successful validation
+  * Suggested metrics dict and logging to file
+* **Human Review & Decision:**
+  * **Accepted:** try/except boundary, REQUIRED_FIELDS validation, seen_nonces set, metrics counters, logging to file (to keep stdout clean for tests that capture stdout+stderr merged)
+  * **Modified:** LLM suggested logging to stderr — changed to file handler `gateway.log` because tests use `stderr=STDOUT` merged pipe, logging to stderr polluted `wait_for_line` (caused "Received ...Gateway health listening" concatenated line). Fixed by logging to file only.
+  * **Modified:** Large packet test `test_gateway_decrypts_large_packet_received_across_multiple_chunks` originally used payload `{"device_id":..., "samples": "x"*5000}` missing required fields, so after adding schema validation it failed. Updated test payload to include required fields + samples to still test buffer accumulation.
+  * **Verification:** Ran `pytest -v` → 33 passed, 0 failed. Manual E2E legacy→gateway with 2 sends works, logs show valid telemetry.
+
+### 1.7. Interaction 7 (ML-KEM Integration): PQC Library and Hybrid Design
+
+* **Context / Objective:** Integrate ML-KEM into Link 2 (gateway→cloud) using existing library, keep legacy Link 1 unchanged.
+* **Prompt Given to LLM:**
+  > *"I need to integrate ML-KEM-512 into my edge-cloud system. I have mlkem==0.0.3 library. Show how to generate keypair, encapsulate, decapsulate, and build hybrid encryption where ML-KEM shared secret (32B) is used as AES-256-GCM key to encrypt telemetry JSON. Wire format should be ct(768)||nonce(12)||aes_ct. Keep it simple, file-based public key distribution."*
+* **LLM Output Summary:**
+  * Initially suggested `MLKEM512.keygen()` and `ek.encaps()` which do not exist in `mlkem==0.0.3`
+  * Suggested hybrid pattern: KEM + AES-GCM, which is correct
+  * Suggested file-based pk distribution for simplicity
+* **Human Review & Decision:**
+  * **Rejected:** `MLKEM512.keygen()` — tested via `python -c "import mlkem; help(mlkem)"` and REPL, found correct API is `ML_KEM(ParameterSet.ML_KEM_512).key_gen() -> ek, dk` and `mlkem_obj.encaps(ek) -> ss, ct` and `mlkem_obj.decaps(dk, ct) -> ss`
+  * **Accepted:** Hybrid pattern, file-based distribution (cloud writes `cloud_public_key.bin` 800B, gateway reads), wire format ct+nonce+aes_ct, constants PK_LEN=800, CT_LEN=768, SS_LEN=32
+  * **Modified:** Added timing metrics `encaps_ms`, `decaps_ms` for PQC observability, added logging
+  * **Verification:** Tested round-trip via `python src/pqc_utils.py` → packet 845B, encaps 0.03ms, decaps 0.04ms, decrypt matches original. Also tested via REPL `encrypt_for_cloud` then `decrypt_from_gateway`.
+
+### 1.8. Interaction 8 (Cloud Service + SQLite DB + Analytics)
+
+* **Context / Objective:** Build cloud service that decapsulates PQC, stores telemetry in simple DB, and provides analytics as observability.
+* **Prompt Given to LLM:**
+  > *"Create a cloud_service.py that listens on TCP 6000 for PQC packets (ct 768 + nonce 12 + aes_ct), decapsulates using ML-KEM-512 private key, AES-GCM decrypts, stores in SQLite telemetry.db with table telemetry(id, device_id, timestamp, temperature, humidity, status, received_at, source_ip, pqc_decaps_ms, raw_json), and has health/analytics endpoint on 6001 returning JSON with db_rows, avg temp/humidity, last 10, decaps_ok/fail, success_rate, avg_decaps_ms. Keep it simple, stdlib only, no Flask."*
+* **LLM Output Summary:**
+  * Suggested using `sqlite3` stdlib, `http.server` for health endpoint (no Flask), threading for health server, metrics dict with lock for thread safety, `check_same_thread=False` for sqlite
+  * Suggested `CREATE TABLE IF NOT EXISTS` and `INSERT` with `?` placeholders
+  * Suggested analytics queries `SELECT COUNT(*), AVG(temperature)` and `last 10 ORDER BY received_at DESC`
+* **Human Review & Decision:**
+  * **Accepted:** SQLite with stdlib, http.server for health (rejected Flask to keep simple), threading, metrics with lock, analytics queries
+  * **Modified:** LLM suggested logging to stderr — changed to file handler `cloud.log` to keep stdout clean for tests and Docker logs
+  * **Verification:** Ran cloud alone → `telemetry.db` 12K created, pk 800B file, `curl http://127.0.0.1:6001/health` returns JSON with db_rows 0, analytics empty, pqc metrics. Then E2E with gateway: 2 sends → DB has 2 rows, health shows db_rows 2, avg_temp 21.8, decaps_ok 2, success_rate 1.0.
+
+### 1.9. Interaction 9 (Gateway Forwarding + Fallback + Health)
+
+* **Context / Objective:** Extend gateway to forward validated telemetry to cloud via PQC, with fallback to local log if cloud down or pk missing, and add health endpoint 5001.
+* **Prompt Given to LLM:**
+  > *"Extend edge_gateway.py to forward telemetry to cloud via PQC: try load cloud_public_key.bin, if missing or cloud unreachable, append JSON to gateway_fallback.log with timestamp and increment fallback_local metric. Use pqc_utils.encrypt_for_cloud and TCP send to 127.0.0.1:6000. Add health endpoint on 5001 returning JSON with received, rejected, replayed, forwarded_to_cloud, fallback_local, cloud_fail, replay_cache_size, uptime. Keep it simple, stdlib http.server, thread-safe metrics."*
+* **LLM Output Summary:**
+  * Suggested `forward_to_cloud()` function with try load pk, try socket create_connection with timeout, fallback to file append, metrics with lock
+  * Suggested health handler similar to cloud, threading
+* **Human Review & Decision:**
+  * **Accepted:** forward_to_cloud logic, fallback log format `<timestamp> <json>`, metrics `forwarded_to_cloud`, `fallback_local`, `cloud_fail`, health thread on 5001
+  * **Modified:** Removed `print` for health listening to keep stdout clean for tests (only log to file), added `metrics_lock` for thread safety
+  * **Verification:** Tested fallback: stop cloud, send legacy → `gateway_fallback.log` has entry, health 5001 shows fallback_local=1. Tested E2E with cloud up: 2 sends → DB 2 rows, gateway health forwarded=2, cloud health decaps_ok=2.
+
+### 1.10. Interaction 10 (Docker + CI/CD + pyproject.toml/uv.lock/.python-version)
+
+* **Context / Objective:** Create CI/CD and Docker that respect pyproject.toml, uv.lock, .python-version, keep simple.
+* **Prompt Given to LLM:**
+  > *"Generate GitHub Actions CI and Dockerfile and docker-compose for Python project using uv package manager, with pyproject.toml, uv.lock, .python-version 3.13. CI should run pytest -v, test PQC utils, check imports. Dockerfile should be python:3.13-slim, respect locked versions via uv sync --frozen, and have HEALTHCHECK. docker-compose should have cloud and gateway services with healthchecks and volume sharing for public key. Keep it simple."*
+* **LLM Output Summary:**
+  * Initially suggested `pip install -r requirements.txt` — rejected, project uses pyproject.toml + uv, not requirements.txt
+  * Suggested Flask for health — rejected, we use stdlib http.server
+  * Suggested `astral-sh/setup-uv` action, `uv sync --frozen`, Dockerfile with `pip install uv && uv sync --frozen --no-install-project`, `ENV PATH .venv/bin`
+* **Human Review & Decision:**
+  * **Rejected:** requirements.txt approach, Flask
+  * **Accepted:** `astral-sh/setup-uv@v4` with cache, `uv python install`, `uv sync --frozen`, `uv pip install pytest`, `uv run pytest -v`, Dockerfile with `COPY pyproject.toml uv.lock .python-version README.md`, `uv sync --frozen --no-install-project`, `ENV PATH .venv/bin`, HEALTHCHECK via socket connect, docker-compose with `depends_on healthy` and bind mounts for pk file
+  * **Modified:** Added `[dependency-groups] dev = ["pytest>=8.0"]` to pyproject.toml to track pytest as dev dep, while main deps remain locked in uv.lock
+  * **Verification:** Ran `pytest -v` 33 passed after pyproject.toml edit, checked Dockerfile copies correct files, CI yml contains checks for .python-version, pyproject.toml, uv.lock existence
+
 ---
 
 ## 2. Design Decisions: Accepted, Modified, and Rejected
