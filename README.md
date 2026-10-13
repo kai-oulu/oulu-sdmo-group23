@@ -121,7 +121,7 @@ uv run python src/pqc_utils.py
 * Kaiquan Mah ("cloud service"/logging/db/analysis, ML-KEM/PQC implementation/migration with AES fallback (if PQC is not supported), docker, CI-CD via GitHub Actions, documentation)
 * Quoc Nguyen (tests)
 * Danish Sharjeel (initial legacy device and edge gateway code and its documentation)
-* Manh Nguyen
+* Manh Nguyen (presentation)
 * Kim Nguyen
 
 Copyright © 2026. All rights reserved.
