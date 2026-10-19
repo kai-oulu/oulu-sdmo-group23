@@ -88,7 +88,7 @@
   ```
   - Work on R2 and R7
   ```
-  - As we are finalising the documentation for submission, we will not be working on refining our build to cater for the risks discovered - R2 and R7
+  - As we are finalising the documentation for submission, we will not be working on refining our build to cater for the risks discovered - R2 and R7, which will be part of our backlog
 
 
 
