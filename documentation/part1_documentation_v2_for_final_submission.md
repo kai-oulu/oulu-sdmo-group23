@@ -83,6 +83,7 @@
   - **Because GitHub's Markdown renderer does not support custom font sizes, we are unable to change the font size of this document we created in markdown format**
   - **If possible, please try to**
     - **Use a monitor display**
+    - **You may wish to review the markdown version of this v2 documentation instead**: https://github.com/kai-oulu/oulu-sdmo-group23/blob/main/documentation/part1_documentation_v2_for_final_submission.md
     - **Zoom in/out** - whether you are reviewing the PDF or markdown version of this v2 document
 - Feedback 10
   ```
