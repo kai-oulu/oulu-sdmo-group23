@@ -318,62 +318,6 @@ print(f'Wire Packet:     {len(enc)} bytes (Nonce: 12, Tag: 16, Overhead: 28 byte
 ```
 
 ### 4.2 Remaining architecture details
-For the remaining technical architecture details, please refer to section 4 of `part1_documentation_v1_for_peer_review.md`.
-
-### 4.2 Wire Formats
-
-- **Link1:** `nonce(12) || ciphertext+tag`, plaintext JSON ~95B, total ~123B, overhead 28B constant, EOF framing (close socket)
-- **Link2:** `ct(768) || nonce(12) || aes_ct+tag` ~845B for small JSON (768+12+65), ss 32B as AES-256-GCM key, EOF framing via `shutdown(SHUT_WR)`
-
-### 4.3 Why Offload PQC to Gateway
-
-- ATmega328P 2KB SRAM cannot hold ML-KEM-512 sk 1632B + workspace 1000-1500B = ~3KB → stack overflow
-- Gateway Linux/Pi has enough RAM, measures encaps 0.03ms Rust / 0.82ms pure Python, decaps 0.04ms / 1.46ms negligible
-- Real-world IoT: many low-cost sensors cannot be upgraded to PQC without hardware replacement (from the CISA PQC phased migration guidelines)
-
-### 4.4 Threading Model
-
-- **2 threads total:** (1) main TCP data thread `accept()` + blocking `recv()` = single-threaded data plane, processes one sensor at a time, while others wait in the TCP backlog queue (and timeout if there are 100 sensors in the queue at once), (2) health HTTP thread 5001 daemon
-- Please note that when we talk about a "single-threaded gateway", it means that the gateway/data plane is single-threaded for the purpose of receiving/processing data from 1 sensor at a time.
-
-### 4.5 Component Details (from 02_ + 03_ + code)
-
-**legacy_device.py (59 lines):**
-- `generate_telemetry()`: device_id sensor-node-01, timestamp int(time.time()), temperature 21.8, humidity 55.4, status OK
-- `encrypt_payload(data, key)`: json dumps → utf-8, AESGCM(key), os.urandom(12) nonce, prepend nonce, returns nonce+ciphertext+tag
-- `main()`: TCP client to 127.0.0.1:5000, sendall, close (EOF)
-- PSK: `b"legacy_secret_16"` 16B (128-bit) stored in Flash ROM on real device
-
-**edge_gateway.py (388 lines, hardened, full from 02_ + 04_ + 05_):**
-- `decrypt_payload(packet, key)`: slice [:12] nonce, [12:] ct, AESGCM decrypt checks GMAC tag first, raises InvalidTag if tampered, returns UTF-8 JSON string
-- `validate_telemetry_schema(payload)`: checks `REQUIRED_FIELDS = {device_id, timestamp, temperature, humidity, status}` subset
-- `seen_nonces=set()` replay cache (tech debt: no TTL, grows forever, cleared on restart → replayed packets accepted again after restart)
-- `metrics` dict with `metrics_lock` threading.Lock: `received, rejected, replayed, invalid_json, invalid_schema, empty, forwarded_to_cloud, fallback_local, cloud_fail, uptime_start`
-- `forward_to_cloud(json_str)`: tries `load_public_key(CLOUD_PK_PATH)` (file-based distribution Phase1, cloud writes pk on start, shared via volume `pqc-shared` in Docker, gitignored `*.bin`), if missing → fallback log + `fallback_local++`, else `pqc_utils.encrypt_for_cloud(plaintext, ek_bytes)` → packet ct+nonce+aes_ct, TCP send to `CLOUD_HOST:6000` (env var, default 127.0.0.1 local, `cloud:6000` in Docker), EOF via `shutdown(SHUT_WR)`, if unreachable → fallback log + `cloud_fail++`, `fallback_local++`, metrics
-- `HealthHandler`: `GET /health` returns JSON metrics, `replay_cache_size=len(seen_nonces)`, `uptime_s`
-- `start_health_server()`: HTTPServer 5001 in daemon thread, logs to file only (not stdout) to keep tests clean - tests merge stdout+stderr via `stderr=STDOUT` and `wait_for_line` looks for `Received from device:`, logging to stderr would cause concatenated line `Received...2026-10-10 INFO Gateway health listening...` → test failure, fixed by file handler `gateway.log`
-- `start_gateway()`: TCP server 5000 with `SO_REUSEADDR`, accept loop with try/except for `InvalidTag, ValueError, UnicodeDecodeError, JSONDecodeError`, logs warning + continue (no crash), prints `Edge Gateway listening...` (expected by tests) and `Received from device: {raw_data}` (expected by tests)
-
-**pqc_utils.py (258 lines, dual-wheel support, full from 03_ + fixes):**
-- Constants: `PK_LEN 800`, `SK_LEN 1632`, `CT_LEN 768`, `SS_LEN 32`, `NONCE_LEN 12`, `CLOUD_PK_PATH` env var
-- **Robust mlkem import (Fix 12):** mlkem 0.0.3 has 2 distributions same version: Rust binding `__init__.py` = `from mlkem.rust import ML_KEM...` + `rust.so` 909KB → `from mlkem import ML_KEM` works, pure Python `__init__.py` empty 0B + `fastmath.so` 80KB → fails, need `from mlkem.ml_kem import ML_KEM`. Fix: try Rust first, fallback to pure Python, set `RUST_BINDING` flag
-- `get_mlkem_instance()`: handles `ParameterSet.ML_KEM_512` (Rust enum) vs `ML_KEM_512` const (pure Python)
-- `generate_keypair(save_path)`: if Rust `ek, dk = mlkem_obj.key_gen()` returns `EncapsKey, DecapsKey` objects → `ek.to_bytes()`, `dk.to_bytes()`, else pure Python returns `ek_bytes, dk_bytes` directly as bytes, save ek 800B to file, return ek_bytes, dk_bytes, mlkem_obj
-- `load_public_key(path)`: read 800B, validate length, tries fallbacks `cloud_public_key.bin`, `shared/`, `/app/shared/`
-- `encrypt_for_cloud(plaintext, ek_bytes)`: if Rust `EncapsKey.from_bytes(ek_bytes)` (handles `from_bytes` signature differs by version, some need param set), `ss, ct = mlkem_obj.encaps(ek)`, else pure Python `ss, ct = mlkem_obj.encaps(ek_bytes)`, `nonce=os.urandom(12)`, `aes_ct=AESGCM(ss).encrypt(nonce, plaintext, None)`, packet=ct+nonce+aes_ct, metrics `encaps_ms, aes_encrypt_ms, total_ms, ct_len, total_len, ss_len, rust_binding`
-- `decrypt_from_gateway(packet, dk_bytes, mlkem_obj)`: split ct/nonce/aes_ct, if Rust `DecapsKey.from_bytes(dk_bytes)` then `ss=mlkem_obj.decaps(dk, ct)`, else `ss=mlkem_obj.decaps(dk_bytes, ct)`, `AESGCM(ss).decrypt`, metrics `decaps_ms`
-- Logging to `pqc.log` file
-
-**cloud_service.py (400 lines, full from 04_ + 05_):**
-- Config: `CLOUD_HOST` env var default 127.0.0.1, `CLOUD_PORT` 6000 data, `HEALTH_HOST` 127.0.0.1, `HEALTH_PORT` 6001, `DB_PATH` env var default `telemetry.db`, `CLOUD_PK_PATH` env var
-- **Import fix (Fix 13):** previously missing `import os` → `NameError: name 'os' is not defined` at `CLOUD_HOST = os.getenv(...)`, fixed by adding `import os`
-- **Robust pqc import (Fix 11):** ensure both `_SRC_DIR` and `_PROJECT_ROOT` in sys.path, only fallback when error contains `pqc_utils`
-- `init_db()`: `DB_PATH.parent.mkdir(parents=True, exist_ok=True)`, `sqlite3.connect(DB_PATH, check_same_thread=False)` allows sharing across threads, `CREATE TABLE IF NOT EXISTS telemetry(id INTEGER PK AUTOINCREMENT, device_id TEXT, timestamp INTEGER, temperature REAL, humidity REAL, status TEXT, received_at INTEGER, source_ip TEXT, pqc_decaps_ms REAL, raw_json TEXT)`, get COUNT for metrics
-- `insert_telemetry(...)`: INSERT with `?`, commit, update `db_rows` metric
-- `get_analytics()`: `COUNT, AVG(temperature), AVG(humidity), MAX(timestamp)`, `last 10 ORDER BY received_at DESC`, `success_rate = decaps_ok/(ok+fail)`, `avg_decaps_ms`, `uptime`
-- `HealthHandler`: `GET /health` or `/analytics` returns JSON with `db_rows, total_received, analytics {total_count, avg_temperature, avg_humidity, max_timestamp, last_10}, pqc {decaps_ok, decaps_fail, json_fail, success_rate, avg_decaps_ms}, uptime_s`
-- `start_health_server()`: HTTPServer 6001 in daemon thread, file logging `cloud.log`
-- `start_cloud()`: `generate_keypair(CLOUD_PK_PATH)` → writes pk 800B, `init_db()`, start health thread, TCP server 6000 recv until EOF (gateway does `sendall + shutdown WR`), `decrypt_from_gateway`, JSON parse, insert, counters `total_received, decaps_ok, decaps_fail, json_fail`, logging
 
 **DB Schema (SQLite, simple, from 05_):**
 ```sql
@@ -392,6 +336,12 @@ telemetry(
 ```
 - raw sqlite file `telemetry.db` gitignored, created at runtime
 - Analytics queries: `COUNT, AVG, last 10`
+
+**For the remaining technical architecture details, please refer to section 4 of `part1_documentation_v1_for_peer_review.md`, such as on:**
+* How the nonce appears in the communication link between sensor to gateway, and gateway to cloud
+* Why Offload PQC to Gateway
+* How many threads
+* How each of the code files work, with their major functions
 
 
 
@@ -929,6 +879,39 @@ docker run --network host python:3.13-slim python src/legacy_device.py
 - **After hardening (try/except + REQUIRED_FIELDS + seen_nonces): 33 passed, 0 failed, both Rust and pure Python venvs**
 - Large packet test updated: originally payload `{"device_id":..., "samples": "x"*5000}` missing required fields, after adding schema validation it failed, updated to include required fields + samples to still test buffer accumulation
 
+
+**How to Run the Full Set of Tests**
+
+```bash
+# Setup
+uv sync --frozen --all-groups
+# or python3 -m venv /tmp/venv && pip install cryptography mlkem pytest
+
+# Run all tests
+uv run pytest -v
+# or PYTHONPATH=. /tmp/venv/bin/python -m pytest -v
+# Expected: 33 passed
+
+# PQC round-trip
+uv run python src/pqc_utils.py
+# Expected: Encrypted packet len 845, metrics encaps_ms 0.06/0.82, Round-trip OK, rust_binding True/False
+
+# 3-tier E2E (3 terminals)
+# Terminal1 Cloud
+uv run python src/cloud_service.py
+# Terminal2 Gateway
+uv run python src/edge_gateway.py
+# Terminal3 Legacy
+uv run python src/legacy_device.py
+# Verify via curl health endpoints and sqlite3
+
+# Docker
+docker build -t edge-gateway:test .
+docker build -t cloud-service:test .
+docker-compose up --build
+```
+
+
 ### 9.2 Manual Tamper Test (from 01_)
 
 ```bash
@@ -1129,38 +1112,8 @@ Remaining work is to clear technical debt (global PSK, replay cache TTL, pk auth
 - `pyproject.toml`, `uv.lock`, `.python-version` (3.13), `README.md`
 
 
-### 12.2 How to Run Tests (full)
 
-```bash
-# Setup
-uv sync --frozen --all-groups
-# or python3 -m venv /tmp/venv && pip install cryptography mlkem pytest
-
-# Run all tests
-uv run pytest -v
-# or PYTHONPATH=. /tmp/venv/bin/python -m pytest -v
-# Expected: 33 passed
-
-# PQC round-trip
-uv run python src/pqc_utils.py
-# Expected: Encrypted packet len 845, metrics encaps_ms 0.06/0.82, Round-trip OK, rust_binding True/False
-
-# 3-tier E2E (3 terminals)
-# Terminal1 Cloud
-uv run python src/cloud_service.py
-# Terminal2 Gateway
-uv run python src/edge_gateway.py
-# Terminal3 Legacy
-uv run python src/legacy_device.py
-# Verify via curl health endpoints and sqlite3
-
-# Docker
-docker build -t edge-gateway:test .
-docker build -t cloud-service:test .
-docker-compose up --build
-```
-
-### 12.3 LLM Interactions Full Log (summary, full in 02_)
+### 12.2 LLM Interactions Full Log (summary, full in 02_)
 
 See [02_design_decisions_n_key_llm_interactions.md sections 1.1-1.10](02_design_decisions_n_key_llm_interactions.md) for our major LLM prompt interactions and human review (accepted/modified/rejected).
 
