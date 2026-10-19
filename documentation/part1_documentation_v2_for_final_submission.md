@@ -32,7 +32,7 @@
 - **KEM = Key Encapsulation Mechanism**: one side encrypts random secret with public key, other decrypts
 - **PSK = Pre-Shared Key**: same 16B key flashed into all devices at factory
 - **AES-GCM = Advanced Encryption Standard - Galois/Counter Mode**: symmetric AEAD (confidentiality + 16B tag for integrity)
-- **pk = public key** (ML-KEM encaps key 800B), **sk/dk = secret/decaps key** 1632B private, **ct = ciphertext** 768B, **ss = shared secret** 32B (becomes AES-256 key), **B=Bytes**
+- **pk = public key** (ML-KEM encaps key 800B), **sk/dk = secret/decaps key** 1632B private key, **ct = ciphertext** 768B, **ss = shared secret** 32B (becomes AES-256 key), **B=Bytes**
 - **TTL = Time To Live**, **OOM = Out Of Memory**, **LRU = Least Recently Used**
 - **MITM = Man-In-The-Middle**, **DoS = Denial of Service**, **TLS = Transport Layer Security**
 - **HSM = Hardware Security Module**, **KMS = Key Management System**, **DB = Database**, **ORM = Object-Relational Mapper** (we avoided)
@@ -43,7 +43,7 @@
 
 ## 1. Summary
 
-**Goal:** Modernize small legacy edge-cloud system made up of a simulated legacy sensor to edge gateway to the cloud, for Post-Quantum Cryptograpcy (PQC), using LLM as an untrusted assistant, with humans evaluating LLM responses and choosing which to use or modify.
+**Goal:** Modernize small legacy edge-cloud system made up of a simulated legacy sensor to edge gateway to the cloud, from using traditional cryptography to using Post-Quantum Cryptograpcy (PQC), using LLM as an untrusted assistant, with humans evaluating LLM responses and choosing which to use or modify.
 
 **What we built:**
 - 2-tier baseline system (legacy → gateway, where 27/33 tests passed)
@@ -54,6 +54,37 @@
 - Cloud Service (simulated; not a real cloud service like AWS/GCP): SQLite to store sensor data, health checks
 - Fallback: If public key is missing or cloud service is unreachable (TCP 6000 refused/timeout), the gateway appends sensor data to gateway logs for business continuity (per CISA hybrid guidance)
 - Operations: Dependency management via uv, pyproject.toml, Docker container for reproducible environment, CI/CD via GitHub actions
+
+**Changes made in part1 documentation v2 to address peer review feedback**
+- Feedback 1 to 5
+   ```
+   - A brief section with a concise executive summary and some high-level diagrams may help also other types of stakeholders (like a project manager) to understand the whole process in a more accessible way.
+   - Some parts felt overly padded
+   - In technical report there should not be instructions on how to run the system those belong to README in the Github. Also 14 pages on the report seem excessive
+   - I'd maybe leave code specific stuff to the repo rather that put it here but that is my opinion
+   - Some parts are hard to read since there are so many code snippets in sentences. A lot of the content feels like it should be left into the repository
+   ```
+  - **We had summary section 1 in v1 of this documentation. We have simplified the summary further so only the major parts of what we build are above, for a non-technical audience**
+  - Also, we had no idea how technical our peer reviewers will be. So our original idea was that (1) the professor has background in cryptography, and (2) the documentation might be the only document reviewed during peer review, so we intended to be as comprehensive as possible by including as much technical details as we could in v1 of our documentation. To be frank, Danish was the person with some cryptography background in the group, so for the rest of the group, it was also difficult to understand all the technical details (e.g. how the bytes are calculated for each part of the encryption/decrpytion/encapsulation/decapsulation method)
+  - **So we have simplified section 4 in v2 of this document, to reduce the information overload (i.e. 'reduce padding')**
+  - **Also, please refer to the baseline architecture diagram in section 3, and final architecture diagram in section 4**
+- Feedback 6
+  ```
+  - many chapters could have been summarized like tests being only one section not five
+  ```
+  - **We have kept baseline tests in section 3 baseline, as the baseline tests are different from the tests on the final system (which has a different architecture)**
+  - **For the remaining test, we have moved from separate sections into only section 9 test**
+- Feedback 7 to 9
+  ```
+  - font size is too small 
+  - Very small font size
+  - Text is really small
+  ```
+  - **Because GitHub's Markdown renderer does not support custom font sizes, we are unable to change the font size of this document we created in markdown format**
+  - **If possible, please try to**
+    - **Use a monitor display**
+    - **Zoom in/out** - whether you are reviewing the PDF or markdown version of this v2 document
+
 
 
 ---
