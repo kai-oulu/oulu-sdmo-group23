@@ -103,7 +103,7 @@ CISA's Post-Quantum Cryptography initiative shares a phased, risk-based migratio
 
 EU roadmap adds: expect 10-20 years for a full migration in large organizations, and they need vendor cooperation, and need to plan for constrained radio overhead (used in low power sensors such as in agriculture or environment/climate monitoring) [3]. The web has seen some progress: hybrid-PQC ciphers are already adopted in 8.6% of world's top 1 million websites, but hybrid-PQC certificates are still in the early stages of implementation. [3] This shows that migration to post-quantum cryptography is feasible and already started.
 
-**Cost:** Replacing 10,000 sensors at €50 each = €500k + installation + downtime. Hybrid offload lets you keep old sensors running while new PQC-capable devices (e.g., ESP32 with >8KB SRAM) are phased in.
+**Cost:** Replacing 10,000 sensors at €50 each = €500k + installation + downtime. Hybrid offload lets you keep old sensors running while new PQC-capable devices (e.g., ESP32 with >8KB SRAM) are phased in. An estimate by the US government in 2024, shared that it might take USD 7.1 billion to migrate prioritised federal civilian systems to Post-Quantum Cryptography between 2025 and 2035. [7]
 
 ---
 
@@ -164,3 +164,4 @@ Cover time concept shows why waiting is risky. The data you send today with 20 y
 - [4] Legacy constraints, computational overhead - https://eureka.patsnap.com/report-how-to-adapt-post-quantum-standards-to-existing-legacy-systems
 - [5] CISA PQC initiative, phased migration - https://www.cisa.gov/topics/risk-management/quantum
 - [6] EU Cyber Resilience Act - https://digital-strategy.ec.europa.eu/en/policies/cyber-resilience-act
+- [7] 2024 US Government Cost Estimate to Migrate to Post-Quantum Cryptography (Added on 2026.10,19 to address a peer review feedback to get the cost estimate) - https://bidenwhitehouse.archives.gov/wp-content/uploads/2024/07/REF_PQC-Report_FINAL_Send.pdf
