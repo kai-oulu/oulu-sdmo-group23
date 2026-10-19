@@ -103,7 +103,7 @@ CISA's Post-Quantum Cryptography initiative shares a phased, risk-based migratio
 
 EU roadmap adds: expect 10-20 years for a full migration in large organizations, and they need vendor cooperation, and need to plan for constrained radio overhead (used in low power sensors such as in agriculture or environment/climate monitoring) [3]. The web has seen some progress: hybrid-PQC ciphers are already adopted in 8.6% of world's top 1 million websites, but hybrid-PQC certificates are still in the early stages of implementation. [3] This shows that migration to post-quantum cryptography is feasible and already started.
 
-**Cost lens for executives:** Replacing 10,000 sensors at €50 each = €500k + installation + downtime. Hybrid offload lets you keep old sensors running while new PQC-capable devices (e.g., ESP32 with >8KB SRAM) are phased in.
+**Cost:** Replacing 10,000 sensors at €50 each = €500k + installation + downtime. Hybrid offload lets you keep old sensors running while new PQC-capable devices (e.g., ESP32 with >8KB SRAM) are phased in.
 
 ---
 

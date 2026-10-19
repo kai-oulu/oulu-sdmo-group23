@@ -84,6 +84,11 @@
   - **If possible, please try to**
     - **Use a monitor display**
     - **Zoom in/out** - whether you are reviewing the PDF or markdown version of this v2 document
+- Feedback 10
+  ```
+  - Work on R2 and R7
+  ```
+  - As we are finalising the documentation for submission, we will not be working on refining our build to cater for the risks discovered - R2 and R7
 
 
 
