@@ -21,7 +21,7 @@
 9. Testing & Evaluation (33/33 tests)  
 10. Final Evaluation (full from [06_](06_final_evaluation.md) strengths, weaknesses & tech debt, risks R1-R7)
 11. References  
-12. Appendix: Files, How to Run Tests, LLM Prompts
+12. Appendix: Files, LLM Prompts
 
 ---
 
